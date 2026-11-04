@@ -236,6 +236,14 @@ test('bevel shader, name matching and automatic cages', async () => {
     const radius = pg.locator('.cs-box .cs-f', { hasText: 'Radius' }).locator('input.cs-input');
     await radius.fill('3');
     await radius.press('Enter');
+    const dist = pg.locator('.cs-box input.cs-input[aria-label="Cage distance, % of the model"]');
+    await dist.fill('5');
+    await dist.press('Enter');
+    await pg.waitForTimeout(300);
+    const cp = await pg.evaluate(() => window.surface.get().cagePreview);
+    assert.ok(Math.abs(cp.front - 0.05) < 1e-6 && !cp.autoCage && !Object.keys(cp.cages).length, 'the cage distance slider sets every cage');
+    assert.equal(await pg.locator('.cs-cages input').first().inputValue(), '5');
+    await pg.getByLabel("Measure each mesh's cage before baking").check();
     for (const m of ['Position', 'Thickness']) await pg.locator('.cs-box .cs-chip', { hasText: m }).first().click();
     await pg.locator('.cs-box select').first().selectOption('512');
     await pg.locator('.cs-box select', { has: pg.locator('option', { hasText: '256' }) }).selectOption('16');

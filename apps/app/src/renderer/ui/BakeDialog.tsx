@@ -119,6 +119,12 @@ export function BakeDialog({ onClose }: { onClose: () => void }) {
                   <span>Auto cages</span>
                 </label>
               </div>
+              <Field label="Distance">
+                <Range value={pct(st.front)} min={0} max={10} step={0.1} label="Cage distance, % of the model" onChange={(v) => setSt((x) => ({ ...x, autoCage: false, front: v / 100, cages: {} }))} onCommit={() => {}} />
+              </Field>
+              <Field label="Behind">
+                <Range value={pct(st.rear)} min={0} max={10} step={0.1} label="Behind the surface, % of the model" onChange={(v) => setSt((x) => ({ ...x, autoCage: false, rear: v / 100, cages: {} }))} onCommit={() => {}} />
+              </Field>
               <div className="cs-cages">
                 <span className="cs-meta">Mesh</span>
                 <span className="cs-meta">Front %</span>
