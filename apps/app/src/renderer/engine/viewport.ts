@@ -168,7 +168,7 @@ export class Viewport {
         part.mesh.material = part.slots.map((slot) => {
           const t = s.project!.textureSets.find((x) => x.slots.includes(slot));
           if (!t) return new THREE.MeshStandardMaterial({ color: 0x555555 });
-          return v.mode === 'material' ? engine.litMaterial(t.id) : engine.channelMaterial(t.id, v.mode as Channel);
+          return v.mode === 'material' ? engine.litMaterial(t.id) : engine.channelMaterial(t.id, v.mode as Exclude<typeof v.mode, 'material'>);
         });
         if (v.wire && this.wireOf !== m) {
           const w = new THREE.LineSegments(new THREE.WireframeGeometry(part.mesh.geometry), new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35 }));
@@ -185,7 +185,7 @@ export class Viewport {
     this.flush();
     if (engine.update()) {
       const s = get();
-      if (s.view.mode !== 'material') for (const t of s.project?.textureSets ?? []) engine.channelMaterial(t.id, s.view.mode as Channel);
+      if (s.view.mode !== 'material') for (const t of s.project?.textureSets ?? []) engine.channelMaterial(t.id, s.view.mode as Exclude<typeof s.view.mode, 'material'>);
       this.needs = true;
     }
     if (!this.needs) return;
@@ -273,7 +273,6 @@ export class Viewport {
   private bindInput(): void {
     const el = this.r.domElement;
     el.addEventListener('contextmenu', (e) => e.preventDefault());
-    el.addEventListener('pointerenter', () => (this.cursor.style.display = get().tool === 'orbit' ? 'none' : 'block'));
     el.addEventListener('pointerleave', () => (this.cursor.style.display = 'none'));
     window.addEventListener('keydown', (e) => e.key === 'Alt' && this.navButtons(true));
     window.addEventListener('keyup', (e) => e.key === 'Alt' && this.navButtons(false));
@@ -295,6 +294,7 @@ export class Viewport {
     el.addEventListener('pointermove', (e) => {
       const b = el.getBoundingClientRect();
       this.cursor.style.transform = `translate(${e.clientX - b.left}px, ${e.clientY - b.top}px)`;
+      this.cursor.style.display = get().tool === 'orbit' ? 'none' : 'block';
       if (this.stroke) for (const ev of e.getCoalescedEvents?.() ?? [e]) this.paintTo(this.screen(ev));
     });
     const end = () => {

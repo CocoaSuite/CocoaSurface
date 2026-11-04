@@ -14,6 +14,12 @@ uniform int u_src;      // 0 flat, 1 painted (premultiplied), 2 material map
 uniform int u_kind;     // 0 colour, 1 grey, 2 normal
 uniform int u_blend;
 uniform int u_hasMask;
+uniform int u_hasGen;
+uniform sampler2D u_gen;
+uniform int u_genCh;
+uniform float u_genLevel;
+uniform float u_genSpread;
+uniform int u_genInvert;
 uniform int u_vUp;
 uniform int u_flipG;
 uniform vec3 u_value;
@@ -45,10 +51,21 @@ void main() {
     if (u_flipG == 1) s.g = 1. - s.g;
   }
   if (u_hasMask == 1) cov *= texture(u_mask, vUv).r;
+  if (u_hasGen == 1) {
+    vec4 gv = texture(u_gen, vUv);
+    float v = u_genCh == 1 ? gv.g : gv.r;
+    if (u_genInvert == 1) v = 1. - v;
+    cov *= smoothstep(u_genLevel - u_genSpread, u_genLevel + u_genSpread + 1e-4, v);
+  }
   float a = clamp(cov * u_opacity, 0., 1.);
   vec3 b = texture(u_below, vUv).rgb;
   vec3 r;
-  if (u_kind == 2) r = normalize(mix(b * 2. - 1., s * 2. - 1., a)) * .5 + .5;
+  if (u_kind == 2) {
+    // Detail on top of what's below: a flat normal changes nothing.
+    vec3 nb = b * 2. - 1., ns = s * 2. - 1.;
+    vec3 d = normalize(vec3(nb.xy + ns.xy, nb.z * ns.z));
+    r = normalize(mix(nb, d, a)) * .5 + .5;
+  }
   else r = mix(b, blendOf(b, s), a);
   o = vec4(r, 1.);
 }`;
@@ -61,6 +78,8 @@ out vec4 o;
 uniform sampler2D u_src;
 uniform sampler2D u_island;
 uniform sampler2D u_height;
+uniform sampler2D u_ao;
+uniform int u_hasAo;
 uniform int u_kind;
 uniform int u_hasHeight;
 uniform float u_size;
@@ -68,7 +87,7 @@ uniform float u_bump;
 
 vec3 value(vec2 uv) {
   vec3 c = texture(u_src, uv).rgb;
-  if (u_kind == 1) return vec3(c.r);
+  if (u_kind == 1) return vec3(u_hasAo == 1 ? c.r * texture(u_ao, uv).r : c.r);
   if (u_kind == 2 && u_hasHeight == 1) {
     float px = 1. / u_size;
     float du = texture(u_height, uv + vec2(px, 0.)).r - texture(u_height, uv - vec2(px, 0.)).r;

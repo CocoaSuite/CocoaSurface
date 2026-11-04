@@ -7,12 +7,13 @@ import { edit, get, useApp } from '../store';
 export function ExportDialog({ onClose }: { onClose: () => void }) {
   const project = useApp((s) => s.project)!;
   const [ex, setEx] = useState<ExportSettings>(project.export);
+  const [mesh, setMesh] = useState(false);
   const [sets, setSets] = useState<string[]>(project.textureSets.map((t) => t.id));
   const put = <K extends keyof ExportSettings>(k: K, v: ExportSettings[K]) => setEx({ ...ex, [k]: v });
   const go = async () => {
     if (JSON.stringify(ex) !== JSON.stringify(project.export)) edit('Change export settings', (p) => ({ ...p, export: ex }));
     onClose();
-    await exportTextures(get().project!.textureSets.filter((t) => sets.includes(t.id)));
+    await exportTextures(get().project!.textureSets.filter((t) => sets.includes(t.id)), mesh);
   };
   return (
     <Dialog title="Export textures" onClose={onClose} width={440}>
@@ -39,6 +40,11 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       <Field label="Pack ORM">
         <Switch checked={ex.packOrm} onChange={(v) => put('packOrm', v)} label="Pack occlusion, roughness and metal into one image" />
       </Field>
+      {project.textureSets.some((t) => t.bake?.done.length) && (
+        <Field label="Mesh maps">
+          <Switch checked={mesh} onChange={setMesh} label="Also export the baked mesh maps" />
+        </Field>
+      )}
       <div className="cs-sec">Texture sets</div>
       {project.textureSets.map((t) => (
         <Field key={t.id} label={t.name}>

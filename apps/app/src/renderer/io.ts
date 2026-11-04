@@ -1,6 +1,6 @@
 import { encodePng, evaluable, writeCocoaMat, type OutputRole } from '@cocoasurface/materials';
 import {
-  allLayers, channelInfo, newProject, newTextureSet, pixelPath, PROJECT_EXT, readProject, setMaterial, uid, writeProject, writeSetMaterial,
+  allLayers, bakedPath, channelInfo, MESH_MAPS, newProject, newTextureSet, pixelPath, PROJECT_EXT, readProject, setMaterial, uid, writeProject, writeSetMaterial,
   type Channel, type FillLayer, type Project, type TextureSet,
 } from '@cocoasurface/project';
 import { engine } from './engine/engine';
@@ -86,8 +86,20 @@ async function load(bytes: Uint8Array, path: string | null): Promise<void> {
     const m = await loadModel(project.model.name, mb);
     warnings.push(...m.warnings);
     engine.setModel(m, mb);
+    engine.high = null;
+    engine.highBytes = null;
+    if (project.highPoly) {
+      const hb = files.get(project.highPoly.file)!;
+      try {
+        engine.high = await loadModel(project.highPoly.name, hb, m.fit);
+        engine.highBytes = hb;
+      } catch (e) {
+        warnings.push(`The high-poly model could not be read: ${(e as Error).message}`);
+      }
+    }
   } else engine.setModel(null, null);
   start(project, path, materials, warnings);
+  await engine.ready();
   for (const t of project.textureSets) {
     const g = engine.sets.get(t.id);
     if (!g) continue;
@@ -98,6 +110,12 @@ async function load(bytes: Uint8Array, path: string | null): Promise<void> {
         if (!b) continue;
         g.p.write(g.target(l.id, key)!, await decodePng(b));
       }
+    for (const m of t.bake?.done ?? []) {
+      const b = files.get(bakedPath(t.id, m));
+      if (!b) continue;
+      const img = await decodePng(b);
+      g.setBaked(m, (out) => g.p.write(out, img), img.width);
+    }
     engine.request(t.id);
   }
 }
@@ -114,6 +132,7 @@ async function serialise(): Promise<Uint8Array> {
   const p = { ...s.project!, modified: new Date().toISOString() };
   const files = new Map<string, Uint8Array>();
   if (p.model && engine.modelBytes) files.set(p.model.file, engine.modelBytes);
+  if (p.highPoly && engine.highBytes) files.set(p.highPoly.file, engine.highBytes);
   for (const m of p.library) {
     const lm = s.materials[m.id];
     if (lm) files.set(m.file, lm.bytes);
@@ -122,6 +141,7 @@ async function serialise(): Promise<Uint8Array> {
   for (const t of p.textureSets) {
     const g = engine.sets.get(t.id);
     if (!g) continue;
+    for (const [m, target] of g.baked) files.set(bakedPath(t.id, m), await encodePng(target.width, target.height, 4, g.p.read(target)));
     for (const [layer, keys] of g.pixels) {
       if (!live.has(layer)) continue;
       for (const [key, target] of keys) files.set(pixelPath(layer, key), await encodePng(target.width, target.height, 4, g.p.read(target)));
@@ -222,6 +242,14 @@ function mapPixels(t: TextureSet, c: Channel, size: number): Uint8Array | null {
   return out;
 }
 
+function imageRows(px: Uint8Array, size: number, vUp: boolean): Uint8Array {
+  if (!vUp) return px;
+  const n = size * 4, out = new Uint8Array(px.length);
+  for (let y = 0; y < size; y++) out.set(px.subarray((size - 1 - y) * n, (size - y) * n), y * n);
+  return out;
+}
+const greenUp = (px: Uint8Array, vUp: boolean) => (vUp ? px : flipGreen(px));
+
 const greyOf = (rgba: Uint8Array) => {
   const g = new Uint8Array(rgba.length / 4);
   for (let i = 0; i < g.length; i++) g[i] = rgba[i * 4]!;
@@ -242,7 +270,7 @@ async function pngOf(c: Channel, px: Uint8Array, size: number): Promise<Uint8Arr
   return channelInfo(c).kind === 'grey' ? encodePng(size, size, 1, greyOf(px)) : encodePng(size, size, 3, rgbOf(px));
 }
 
-export async function exportTextures(sets: TextureSet[]): Promise<void> {
+export async function exportTextures(sets: TextureSet[], meshMaps = false): Promise<void> {
   const s = get();
   const ex = s.project!.export;
   const folder = await host.folder();
@@ -276,6 +304,16 @@ export async function exportTextures(sets: TextureSet[]): Promise<void> {
         await host.writeIn(folder, name(MAP_NAMES[c]), await pngOf(c, px, size));
         n++;
       }
+      const g = engine.sets.get(t.id);
+      if (meshMaps && g)
+        for (const [m, target] of g.baked) {
+          const px = imageRows(g.p.read(target), target.width, g.vUp);
+          const grey = m === 'occlusion' || m === 'curvature' || m === 'thickness';
+          const out = m === 'normal' ? (ex.normalGreen === 'down' ? flipGreen(greenUp(px, g.vUp)) : greenUp(px, g.vUp)) : px;
+          const label = MESH_MAPS.find((x) => x.id === m)!.label.replace(/\s+/g, '');
+          await host.writeIn(folder, name(`Mesh${label}`), grey ? await encodePng(target.width, target.width, 1, greyOf(out)) : await encodePng(target.width, target.width, 3, rgbOf(out)));
+          n++;
+        }
     }
     toast(`Exported ${n} image${n === 1 ? '' : 's'}`);
   });

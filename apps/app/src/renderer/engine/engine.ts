@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { allLayers, type Channel, type FillLayer, type Project, type TextureSet } from '@cocoasurface/project';
+import { allLayers, type Channel, type FillLayer, type MeshMap, type Project, type TextureSet } from '@cocoasurface/project';
 import { get, useApp } from '../store';
 import { Passes, SetGPU, type Key } from './gpu';
 import { evaluateMaps, toTextures, type RoleTextures } from './library';
@@ -27,6 +27,8 @@ class Engine {
   p: Passes | null = null;
   model: LoadedModel | null = null;
   modelBytes: Uint8Array | null = null;
+  high: LoadedModel | null = null;
+  highBytes: Uint8Array | null = null;
   readonly sets = new Map<string, SetGPU>();
   private lit = new Map<string, THREE.MeshStandardMaterial>();
   private flat = new Map<string, THREE.MeshBasicMaterial>();
@@ -37,9 +39,17 @@ class Engine {
   /** The layer whose stroke is in progress. */
   active: { set: string; layer: string; keys: Key[] } | null = null;
 
+  private waiting: (() => void)[] = [];
+
+  /** Resolves once the viewport has given the engine its renderer. */
+  ready(): Promise<void> {
+    return this.p ? Promise.resolve() : new Promise((res) => this.waiting.push(res));
+  }
+
   attach(r: THREE.WebGLRenderer): void {
     this.r = r;
     this.p = new Passes(r);
+    for (const w of this.waiting.splice(0)) setTimeout(w, 0);
     if (this.model) this.p.setParts(this.model.parts);
     this.syncSets(get().project);
   }
@@ -50,6 +60,8 @@ class Engine {
     this.fills.clear();
     this.model = m;
     this.modelBytes = bytes;
+    this.high = null;
+    this.highBytes = null;
     if (m) this.p?.setParts(m.parts);
   }
 
@@ -138,7 +150,7 @@ class Engine {
   private bind(t: TextureSet, g: SetGPU): void {
     const m = this.litMaterial(t.id);
     const d = (c: Channel) => g.display.get(c)?.texture ?? null;
-    const want = { map: d('color'), roughnessMap: d('roughness'), metalnessMap: d('metalness'), normalMap: d('normal'), aoMap: d('occlusion'), emissiveMap: d('glow'), alphaMap: d('opacity') };
+    const want = { map: d('color'), roughnessMap: d('roughness'), metalnessMap: d('metalness'), normalMap: d('normal'), aoMap: d('occlusion') ?? g.baked.get('occlusion')?.texture ?? null, emissiveMap: d('glow'), alphaMap: d('opacity') };
     let changed = false;
     for (const [k, v] of Object.entries(want))
       if ((m as unknown as Record<string, unknown>)[k] !== v) {
@@ -163,14 +175,15 @@ class Engine {
     return m;
   }
 
-  channelMaterial(set: string, c: Channel): THREE.MeshBasicMaterial {
+  channelMaterial(set: string, c: Channel | `mesh:${MeshMap}`): THREE.MeshBasicMaterial {
     let m = this.flat.get(set);
     if (!m) {
       m = new THREE.MeshBasicMaterial({ toneMapped: false, side: THREE.DoubleSide });
       decode(m, ['map']);
       this.flat.set(set, m);
     }
-    const tex = this.sets.get(set)?.display.get(c)?.texture ?? null;
+    const g = this.sets.get(set);
+    const tex = (c.startsWith('mesh:') ? g?.baked.get(c.slice(5) as MeshMap) : g?.display.get(c as Channel))?.texture ?? null;
     if (m.map !== tex) {
       m.map = tex;
       m.needsUpdate = true;

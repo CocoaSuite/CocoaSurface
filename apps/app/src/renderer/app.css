@@ -59,3 +59,6 @@
 .cs-start .cs-row { display: flex; gap: 8px; }
 .cs-start .cs-recent button { background: none; border: 0; text-align: left; padding: 5px 0; color: var(--fg); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; }
 .cs-start .cs-recent button:hover { color: #fff; text-decoration: underline; }
+.cs-job { display: flex; align-items: center; gap: 10px; top: auto; bottom: 12px; }
+.cs-bar { width: 160px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.cs-bar i { display: block; height: 100%; background: var(--fg); }

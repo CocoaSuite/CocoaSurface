@@ -47,6 +47,50 @@ export interface FlatValues {
 
 export const FLAT_DEFAULTS: FlatValues = { color: '#9a9a9a', roughness: 0.6, metalness: 0, height: 0.5, occlusion: 1, glow: '#000000', opacity: 1 };
 
+export type MeshMap = 'normal' | 'worldNormal' | 'position' | 'occlusion' | 'curvature' | 'thickness' | 'id';
+
+export const MESH_MAPS: { id: MeshMap; label: string }[] = [
+  { id: 'normal', label: 'Normal' },
+  { id: 'worldNormal', label: 'World normal' },
+  { id: 'position', label: 'Position' },
+  { id: 'occlusion', label: 'Ambient occlusion' },
+  { id: 'curvature', label: 'Curvature' },
+  { id: 'thickness', label: 'Thickness' },
+  { id: 'id', label: 'ID' },
+];
+
+export interface BakeSettings {
+  size: TextureSize;
+  maps: MeshMap[];
+  /** Cast from the low-poly surface onto the project's high-poly model. */
+  useHigh: boolean;
+  /** Ray distances in front of and behind the surface, as a share of the model's size. */
+  front: number;
+  rear: number;
+  aoSamples: number;
+  /** As a share of the model's size. */
+  aoDistance: number;
+  idFrom: 'mesh' | 'material';
+}
+
+export const BAKE_DEFAULTS: BakeSettings = { size: 2048, maps: ['normal', 'worldNormal', 'position', 'occlusion', 'curvature', 'thickness', 'id'], useHigh: false, front: 0.03, rear: 0.03, aoSamples: 64, aoDistance: 0.2, idFrom: 'material' };
+
+/** A mask made from a baked mesh map: edges, cavities, thin parts, height or up-facing surfaces. */
+export interface Generator {
+  source: 'curvature' | 'occlusion' | 'thickness' | 'height' | 'up';
+  level: number;
+  spread: number;
+  invert: boolean;
+}
+
+export const GENERATOR_SOURCES: { value: Generator['source']; label: string; map: MeshMap }[] = [
+  { value: 'curvature', label: 'Edges (curvature)', map: 'curvature' },
+  { value: 'occlusion', label: 'Cavities (occlusion)', map: 'occlusion' },
+  { value: 'thickness', label: 'Thin parts (thickness)', map: 'thickness' },
+  { value: 'height', label: 'Height on the model', map: 'position' },
+  { value: 'up', label: 'Facing up', map: 'worldNormal' },
+];
+
 /** A library material used by a fill layer, with this layer's own parameter values. */
 export interface MaterialUse {
   material: string;
@@ -66,6 +110,8 @@ interface LayerBase {
   channels: Channel[];
   /** A painted black and white mask (white shows the layer). Its pixels are stored with the project. */
   mask: boolean;
+  /** Multiplies the mask (or is the mask when there's no painted one). */
+  generator?: Generator | null;
 }
 
 export interface PaintLayer extends LayerBase {
@@ -98,6 +144,8 @@ export interface TextureSet {
   channels: Channel[];
   /** How strongly height becomes bumps in the normal map (1 = default). */
   bump?: number;
+  /** Mesh maps baked for this set and how. Their pixels are stored with the project. */
+  bake?: { settings: BakeSettings; done: MeshMap[] };
   /** Top of the stack first. */
   layers: Layer[];
 }
@@ -126,6 +174,8 @@ export interface Project {
   created: string;
   modified: string;
   model: { file: string; name: string } | null;
+  /** The detailed model baked from, if any. */
+  highPoly?: { file: string; name: string } | null;
   textureSets: TextureSet[];
   library: LibraryMaterial[];
   export: ExportSettings;

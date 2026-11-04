@@ -1,0 +1,137 @@
+// Baking in a browser: mesh maps from a high-poly model, a generated mask, and the maps kept in the project.
+// Run with `npm run test:e2e` after `npm run build:renderer`. Needs and a Chromium: set CHROMIUM to its path, or have Playwright's installed.
+import { test } from 'vitest';
+import { evaluable, outputNodes, readCocoaMat } from '@cocoasurface/materials';
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { chromium } from 'playwright-core';
+
+const here = import.meta.dirname;
+const dist = path.join(here, '../dist/renderer');
+const fixtures = path.join(here, '../../../packages/materials/test/fixtures');
+const tmp = mkdtempSync(path.join(tmpdir(), 'cs-e2e-'));
+
+function sphere(file) {
+  const v = [], t = [], f = [], R = 32, S = 16;
+  for (let j = 0; j <= S; j++)
+    for (let i = 0; i <= R; i++) {
+      const th = (Math.PI * j) / S, ph = (2 * Math.PI * i) / R;
+      v.push(`v ${Math.sin(th) * Math.cos(ph)} ${Math.cos(th)} ${Math.sin(th) * Math.sin(ph)}`);
+      t.push(`vt ${i / R} ${1 - j / S}`);
+    }
+  for (let j = 0; j < S; j++)
+    for (let i = 0; i < R; i++) {
+      const a = j * (R + 1) + i + 1, b = a + 1, c = a + R + 1, d = c + 1;
+      f.push(`f ${a}/${a} ${b}/${b} ${c}/${c}`, `f ${b}/${b} ${d}/${d} ${c}/${c}`);
+    }
+  writeFileSync(file, ['o Ball', 'usemtl Skin', ...v, ...t, ...f].join('\n'));
+}
+
+const types = { '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.html': 'text/html' };
+
+function bumpy(file, R, S, bump) {
+  const v = [], t = [], f = [];
+  for (let j = 0; j <= S; j++)
+    for (let i = 0; i <= R; i++) {
+      const th = (Math.PI * j) / S, ph = (2 * Math.PI * i) / R;
+      const r = 1 + bump * (0.5 + 0.5 * Math.sin(ph * 8) * Math.sin(th * 8));
+      v.push(`v ${r * Math.sin(th) * Math.cos(ph)} ${r * Math.cos(th)} ${r * Math.sin(th) * Math.sin(ph)}`);
+      t.push(`vt ${i / R} ${1 - j / S}`);
+    }
+  for (let j = 0; j < S; j++)
+    for (let i = 0; i < R; i++) {
+      const a = j * (R + 1) + i + 1, b = a + 1, c = a + R + 1, d = c + 1;
+      f.push(`f ${a}/${a} ${b}/${b} ${c}/${c}`, `f ${b}/${b} ${d}/${d} ${c}/${c}`);
+    }
+  writeFileSync(file, ['o Ball', 'usemtl Skin', ...v, ...t, ...f].join('\n'));
+}
+
+test('bake from a high-poly model, drive a mask with the maps, save and reopen', async () => {
+  const low = path.join(tmp, 'low.obj'), high = path.join(tmp, 'high.obj');
+  bumpy(low, 32, 16, 0);
+  bumpy(high, 128, 64, 0.04);
+  const srv = createServer(async (q, r) => {
+    const u = decodeURIComponent(q.url.split('?')[0]);
+    const p = path.join(dist, u === '/' ? 'index.html' : u);
+    try {
+      r.setHeader('content-type', types[path.extname(p)] ?? 'application/octet-stream');
+      r.end(await readFile(p));
+    } catch {
+      r.statusCode = 404;
+      r.end();
+    }
+  }).listen(0);
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const errors = [];
+  try {
+    const pg = await browser.newPage({ viewport: { width: 1440, height: 860 }, acceptDownloads: true });
+    pg.on('pageerror', (e) => errors.push(e.message));
+    pg.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+    const open = async (trigger, files) => {
+      const fc = pg.waitForEvent('filechooser');
+      await trigger();
+      await (await fc).setFiles(files);
+    };
+    const mapStats = (kind, name) =>
+      pg.evaluate(([kind, name]) => {
+        const g = [...window.surface.engine.sets.values()][0];
+        const t = (kind === 'baked' ? g.baked : g.display).get(name);
+        const px = g.p.read(t);
+        let s = 0, s2 = 0;
+        const n = px.length / 4;
+        for (let i = 0; i < px.length; i += 4) {
+          s += px[i];
+          s2 += px[i] * px[i];
+        }
+        return { mean: s / n, sd: Math.sqrt(Math.max(0, s2 / n - (s / n) ** 2)) };
+      }, [kind, name]);
+
+    await pg.goto(`http://localhost:${srv.address().port}/?inspect`);
+    await open(() => pg.getByText('New project from a model…').first().click(), low);
+    await pg.waitForSelector('canvas.cs-gl');
+    await pg.locator('.cs-side.l select').first().selectOption('512');
+    await pg.getByText('Bake mesh maps…').first().click();
+    await open(() => pg.locator('.cs-box button', { hasText: 'Load' }).click(), high);
+    await pg.locator('.cs-box').getByText('Use it').waitFor();
+    for (const m of ['World normal', 'Position', 'Thickness', 'ID']) await pg.locator('.cs-box .cs-chip', { hasText: m }).first().click();
+    await pg.locator('.cs-box select').first().selectOption('512');
+    await pg.locator('.cs-box select').nth(1).selectOption('16');
+    await pg.getByRole('button', { name: 'Bake', exact: true }).click();
+    await pg.waitForFunction(() => !window.surface.get().job && window.surface.get().project.textureSets[0].bake, null, { timeout: 240_000 });
+    const done = await pg.evaluate(() => window.surface.get().project.textureSets[0].bake.done);
+    assert.deepEqual(done, ['normal', 'occlusion', 'curvature']);
+    const normal = await mapStats('baked', 'normal');
+    assert.ok(normal.sd > 2, 'the bumps of the high-poly model are in the normal map');
+    const curv = await mapStats('baked', 'curvature');
+    assert.ok(curv.sd > 2, 'curvature varies over the bumps');
+
+    await pg.getByLabel('New fill layer').click();
+    await pg.locator('.cs-props select').filter({ has: pg.locator('option', { hasText: 'Edges (curvature)' }) }).selectOption('curvature');
+    const rough = pg.locator('.cs-props .cs-f', { hasText: 'Roughness' }).locator('input.cs-input').last();
+    await rough.fill('0');
+    await rough.press('Enter');
+    await pg.waitForTimeout(1500);
+    const masked = await mapStats('display', 'roughness');
+    assert.ok(masked.sd > 1, 'the edge mask shows the fill on part of the model only');
+
+    const d = pg.waitForEvent('download');
+    await pg.keyboard.press('Control+s');
+    const saved = path.join(tmp, 'baked.cocoasurf');
+    await (await d).saveAs(saved);
+    await pg.reload();
+    await open(() => pg.getByText('Open…').first().click(), saved);
+    await pg.waitForSelector('canvas.cs-gl');
+    await pg.waitForTimeout(3000);
+    const again = await mapStats('baked', 'normal');
+    assert.ok(Math.abs(again.mean - normal.mean) < 0.5 && Math.abs(again.sd - normal.sd) < 0.5, 'baked maps come back with the project');
+    assert.equal(await pg.evaluate(() => !!window.surface.get().project.highPoly), true);
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+    srv.close();
+  }
+}, 400_000);

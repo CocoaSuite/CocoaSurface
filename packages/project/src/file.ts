@@ -12,6 +12,7 @@ export interface ProjectFile {
 }
 
 export const pixelPath = (layer: string, channel: string) => `pixels/${layer}/${channel}.png`;
+export const bakedPath = (set: string, map: string) => `baked/${set}/${map}.png`;
 
 const enc = (v: unknown) => new TextEncoder().encode(`${JSON.stringify(v, null, 2)}\n`);
 
@@ -71,6 +72,7 @@ export async function readProject(bytes: Uint8Array): Promise<{ ok: true; value:
   const project = p as unknown as Project;
   const files = new Map<string, Uint8Array>();
   for (const [name, data] of zip) if (name !== 'mimetype' && name !== 'project.json') files.set(name, data);
+  if (project.highPoly && !files.has(project.highPoly.file)) return fail(`The high-poly model “${project.highPoly.name}” is missing from the project.`);
   if (project.model && !files.has(project.model.file)) return fail(`The model “${project.model.name}” is missing from the project.`);
   for (const m of project.library) if (!files.has(m.file)) return fail(`The material “${m.name}” is missing from the project.`);
   return { ok: true, value: { project, files } };

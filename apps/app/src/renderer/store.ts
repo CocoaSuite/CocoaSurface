@@ -1,9 +1,9 @@
 import { create } from 'zustand';
-import { findLayer, type Channel, type Layer, type Project, type TextureSet } from '@cocoasurface/project';
+import { findLayer, type Channel, type Layer, type MeshMap, type Project, type TextureSet } from '@cocoasurface/project';
 import type { LoadedMaterial } from './engine/library';
 
 export type Tool = 'paint' | 'erase' | 'orbit';
-export type ViewMode = 'material' | Channel;
+export type ViewMode = 'material' | Channel | `mesh:${MeshMap}`;
 
 export interface Brush {
   size: number;
@@ -42,6 +42,8 @@ interface State {
   warnings: string[];
   toast: { text: string; n: number } | null;
   busy: string | null;
+  /** A long job that can be stopped: its label, share done (0–1), and how to stop it. */
+  job: { label: string; share: number; cancel: () => void } | null;
   history: { undo: string | null; redo: string | null };
 }
 
@@ -60,6 +62,7 @@ export const useApp = create<State>(() => ({
   warnings: [],
   toast: null,
   busy: null,
+  job: null,
   history: { undo: null, redo: null },
 }));
 

@@ -6,6 +6,8 @@ A ZIP. The first entry is `mimetype`, stored, holding `application/vnd.cocoasuit
 |---|---|
 | `project.json` | `Project` (`packages/project/src/model.ts`): name, model reference, texture sets with their layer stacks, library, export settings. |
 | `model/<file>` | The imported model, unchanged. |
+| `highpoly/<file>` | The high-poly model baked from, unchanged (if any). |
+| `baked/<set>/<map>.png` | Baked mesh maps, RGBA, row 0 at v = 0. |
 | `materials/<id>.cocoamat` | Library materials, unchanged. |
 | `pixels/<layer>/<channel>.png` | Painted pixels, RGBA, premultiplied, row 0 at v = 0. `mask.png` is a layer's mask (grey, white shows). |
 

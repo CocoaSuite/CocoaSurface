@@ -123,6 +123,7 @@ test('paint, fill with a material, save, reopen and export', async () => {
     await pg.waitForSelector('canvas.cs-gl');
     await pg.waitForTimeout(4000);
     assert.deepEqual(await stats(), filled, 'the reopened project looks the same');
+    assert.ok(await pg.evaluate(() => [...window.surface.engine.sets.values()][0].pixels.size > 0), 'painted pixels come back');
 
     for (const f of [exported, setFile]) {
       const r = await readCocoaMat(new Uint8Array(readFileSync(f)));

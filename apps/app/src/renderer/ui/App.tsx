@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Divider, MenuBar, NumberField, Spacer, Switch, Toast, ToolButton, type MenuEntry } from '@cocoasurface/ui';
-import { CHANNELS } from '@cocoasurface/project';
+import { CHANNELS, MESH_MAPS } from '@cocoasurface/project';
 import { autosave, exportSetMaterial, importMaterials, importModelInto, newFromModel, openProject, recover, saveProject } from '../io';
 import { currentSet, get, redo, set, undo, useApp, type Brush, type Tool } from '../store';
+import { BakeDialog } from './BakeDialog';
 import { ExportDialog } from './ExportDialog';
 import { Layers, addLayer, removeCurrentLayer } from './Layers';
 import { Library } from './Library';
@@ -52,6 +53,7 @@ export function App() {
   const toastMsg = useApp((s) => s.toast);
   const history = useApp((s) => s.history);
   const [exporting, setExporting] = useState(false);
+  const [baking, setBaking] = useState(false);
 
   useEffect(() => {
     void recover();
@@ -99,6 +101,8 @@ export function App() {
         { label: 'Replace the model…', disabled: !has, onSelect: () => void importModelInto() },
         { label: 'Import materials…', disabled: !has, onSelect: () => void importMaterials() },
         'separator',
+        { label: 'Bake mesh maps…', disabled: !has || !currentSet(), onSelect: () => setBaking(true) },
+        'separator',
         { label: 'Export textures…', disabled: !has, onSelect: () => setExporting(true) },
         { label: 'Export texture set as material…', disabled: !has, onSelect: () => currentSet() && void exportSetMaterial(currentSet()!) },
       ],
@@ -119,6 +123,7 @@ export function App() {
       items: [
         { label: 'Material', onSelect: () => set((s) => ({ view: { ...s.view, mode: 'material' } })) },
         ...CHANNELS.map((c) => ({ label: c.label, onSelect: () => set((s) => ({ view: { ...s.view, mode: c.id } })) })),
+        ...(currentSet()?.bake?.done ?? []).map((m) => ({ label: `Mesh map: ${MESH_MAPS.find((x) => x.id === m)!.label}`, onSelect: () => set((s) => ({ view: { ...s.view, mode: `mesh:${m}` as const } })) })),
         'separator',
         { label: get().view.wire ? 'Hide wireframe' : 'Show wireframe', onSelect: () => set((s) => ({ view: { ...s.view, wire: !s.view.wire } })) },
         { label: get().view.grid ? 'Hide grid' : 'Show grid', onSelect: () => set((s) => ({ view: { ...s.view, grid: !s.view.grid } })) },
@@ -143,7 +148,7 @@ export function App() {
             ))}
           </div>
           <div className="cs-side l">
-            <TextureSets />
+            <TextureSets onBake={() => setBaking(true)} />
             <Library />
           </div>
           <ViewportPane />
@@ -156,6 +161,7 @@ export function App() {
         <Start />
       )}
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
+      {baking && currentSet() && <BakeDialog onClose={() => setBaking(false)} />}
       <Toast message={toastMsg?.text ?? null} nonce={toastMsg?.n ?? 0} />
     </div>
   );

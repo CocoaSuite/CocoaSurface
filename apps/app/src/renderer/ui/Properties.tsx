@@ -1,5 +1,5 @@
 import { Button, Field, NumberField, PanelHeader, Section, Switch } from '@cocoasurface/ui';
-import { BLEND_MODES, CHANNELS, updateLayer, type BlendMode, type FillLayer, type FlatValues, type Layer } from '@cocoasurface/project';
+import { BLEND_MODES, CHANNELS, GENERATOR_SOURCES, updateLayer, type BlendMode, type FillLayer, type FlatValues, type Generator, type Layer, type TextureSet } from '@cocoasurface/project';
 import type { Parameter } from '@cocoasurface/materials';
 import type { LoadedMaterial } from '../engine/library';
 import { exportFillMaterial } from '../io';
@@ -139,6 +139,43 @@ function FillProps({ l }: { l: FillLayer }) {
   );
 }
 
+function GeneratorProps({ l, t }: { l: Layer; t: TextureSet }) {
+  const g = l.generator;
+  const put = (v: Partial<Generator> | null, gesture = false) =>
+    change(l, v ? `Change the mask of ${l.name}` : `Remove the generated mask of ${l.name}`, (x) => ({ ...x, generator: v ? { ...(x.generator ?? { source: 'curvature', level: 0.6, spread: 0.1, invert: false }), ...v } : null }), gesture);
+  const src = g && GENERATOR_SOURCES.find((x) => x.value === g.source)!;
+  return (
+    <>
+      <Section title="Generated mask" />
+      <Field label="From">
+        <select className="cs-select" value={g?.source ?? ''} onChange={(e) => put(e.target.value ? { source: e.target.value as Generator['source'] } : null)}>
+          <option value="">None</option>
+          {GENERATOR_SOURCES.map((x) => (
+            <option key={x.value} value={x.value}>
+              {x.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {g && (
+        <>
+          {!t.bake?.done.includes(src!.map) && <span className="cs-note warn">Bake the {src!.map === 'worldNormal' ? 'world normal' : src!.map} mesh map to use this.</span>}
+          <Field label="Level">
+            <Range value={g.level} min={0} max={1} label="Level" onChange={(v) => put({ level: v }, true)} onCommit={() => commit(`Change the mask of ${l.name}`)} />
+          </Field>
+          <Field label="Softness">
+            <Range value={g.spread} min={0} max={0.5} label="Softness" onChange={(v) => put({ spread: v }, true)} onCommit={() => commit(`Change the mask of ${l.name}`)} />
+          </Field>
+          <Field label="Invert">
+            <Switch checked={g.invert} label="Invert" onChange={(v) => put({ invert: v })} />
+          </Field>
+          {l.mask && <span className="cs-note">Multiplied by the painted mask.</span>}
+        </>
+      )}
+    </>
+  );
+}
+
 function BrushProps({ l }: { l: Layer }) {
   const b = useApp((s) => s.brush);
   const put = (k: keyof Brush, v: unknown) => set((s) => ({ brush: { ...s.brush, [k]: v } }));
@@ -219,7 +256,8 @@ export function Properties() {
           {l.kind === 'paint' && !maskEdit && <BrushProps l={l} />}
           {l.kind === 'paint' && !maskEdit && <span className="cs-note">Normal detail comes from painted height.</span>}
           {l.kind === 'fill' && <FillProps l={l} />}
-          {l.kind === 'fill' && !l.mask && <span className="cs-note">Add a mask to paint where this fill shows.</span>}
+          {l.kind === 'fill' && !l.mask && !l.generator && <span className="cs-note">Add a mask to paint where this fill shows, or generate one from the mesh maps.</span>}
+          {l.kind !== 'group' && <GeneratorProps l={l} t={t} />}
           {l.kind === 'group' && <span className="cs-note">The group's opacity and visibility apply to the layers in it.</span>}
         </div>
       </div>

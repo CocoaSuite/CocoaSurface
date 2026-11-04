@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { Button, IconButton } from '@cocoasurface/ui';
-import { CHANNELS } from '@cocoasurface/project';
+import { CHANNELS, MESH_MAPS } from '@cocoasurface/project';
 import { Viewport, type CameraView } from '../engine/viewport';
 import { setView } from '../io';
-import { set, useApp, type ViewMode } from '../store';
+import { currentSet, set, useApp, type ViewMode } from '../store';
 
 let current: Viewport | null = null;
 export const viewport = () => current;
@@ -21,6 +21,9 @@ export function ViewportPane() {
   const view = useApp((s) => s.view);
   const busy = useApp((s) => s.busy);
   const warnings = useApp((s) => s.warnings);
+  const job = useApp((s) => s.job);
+  useApp((s) => s.project);
+  const baked = currentSet()?.bake?.done ?? [];
 
   useEffect(() => {
     const v = new Viewport(ref.current!);
@@ -59,6 +62,15 @@ export function ViewportPane() {
               {c.label}
             </option>
           ))}
+          {baked.length > 0 && (
+            <optgroup label="Mesh maps">
+              {MESH_MAPS.filter((m) => baked.includes(m.id)).map((m) => (
+                <option key={m.id} value={`mesh:${m.id}`}>
+                  {m.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
         <Button size="sm" aria-pressed={view.ortho} onClick={() => set((s) => ({ view: { ...s.view, ortho: !s.view.ortho } }))}>
           {view.ortho ? 'Orthographic' : 'Perspective'}
@@ -68,6 +80,18 @@ export function ViewportPane() {
         </Button>
       </div>
       {busy && <div className="cs-busy">{busy}…</div>}
+      {job && (
+        <div className="cs-busy cs-job">
+          <span>{job.label}</span>
+          <span className="cs-bar">
+            <i style={{ width: `${Math.round(job.share * 100)}%` }} />
+          </span>
+          <span className="cs-meta">{Math.round(job.share * 100)}%</span>
+          <Button size="sm" onClick={job.cancel}>
+            Stop
+          </Button>
+        </div>
+      )}
       {warnings.length > 0 && (
         <div className="cs-warn">
           {warnings.map((w, i) => (

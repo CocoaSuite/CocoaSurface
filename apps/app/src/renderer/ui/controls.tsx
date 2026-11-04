@@ -18,7 +18,7 @@ export function Range({ value, min, max, step, label, onChange, onCommit }: { va
         onPointerUp={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
         onKeyUp={(e) => onCommit(Number((e.target as HTMLInputElement).value))}
       />
-      <NumberField value={value} label="" step={st} ariaLabel={label} onChange={(v) => onChange(clamp(v))} onCommit={(v) => onCommit(clamp(v))} />
+      <NumberField value={value} label="" step={st} ariaLabel={label} onChange={(v) => onChange(clamp(v))} onCommit={(v) => (onChange(clamp(v)), onCommit(clamp(v)))} />
     </span>
   );
 }

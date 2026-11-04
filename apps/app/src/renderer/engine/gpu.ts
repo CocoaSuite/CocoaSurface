@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
-import { BLEND_MODES, channelInfo, type Channel, type FillLayer, type Layer, type TextureSet } from '@cocoasurface/project';
+import { BLEND_MODES, GENERATOR_SOURCES, channelInfo, type Channel, type FillLayer, type Layer, type TextureSet } from '@cocoasurface/project';
 import type { Part } from './model';
 import type { RoleTextures } from './library';
 import { COMMIT_FS, COPY_FS, DAB_FS, DIST_FS, DIST_VS, FILL_FS, FINAL_FS, ISLAND_FS, LAYER_FS, MAX_DABS, QUAD_VS, UV_VS } from './shaders';
@@ -42,9 +42,9 @@ export class Passes {
   readonly quad = new FullScreenQuad();
   readonly layer = shader(LAYER_FS, {
     u_below: { value: null }, u_tex: { value: null }, u_mask: { value: null }, u_src: { value: 0 }, u_kind: { value: 0 }, u_blend: { value: 0 },
-    u_hasMask: { value: 0 }, u_vUp: { value: 0 }, u_flipG: { value: 0 }, u_value: { value: new THREE.Vector3() }, u_scale: { value: 1 }, u_opacity: { value: 1 },
+    u_hasMask: { value: 0 }, u_hasGen: { value: 0 }, u_gen: { value: null }, u_genCh: { value: 0 }, u_genLevel: { value: 0.5 }, u_genSpread: { value: 0.1 }, u_genInvert: { value: 0 }, u_vUp: { value: 0 }, u_flipG: { value: 0 }, u_value: { value: new THREE.Vector3() }, u_scale: { value: 1 }, u_opacity: { value: 1 },
   });
-  readonly final = shader(FINAL_FS, { u_src: { value: null }, u_island: { value: null }, u_height: { value: null }, u_kind: { value: 0 }, u_hasHeight: { value: 0 }, u_size: { value: 1 }, u_bump: { value: 8 } });
+  readonly final = shader(FINAL_FS, { u_src: { value: null }, u_island: { value: null }, u_height: { value: null }, u_ao: { value: null }, u_hasAo: { value: 0 }, u_kind: { value: 0 }, u_hasHeight: { value: 0 }, u_size: { value: 1 }, u_bump: { value: 8 } });
   readonly commit = shader(COMMIT_FS, { u_dst: { value: null }, u_stroke: { value: null }, u_value: { value: new THREE.Vector4() }, u_opacity: { value: 1 }, u_erase: { value: 0 } });
   readonly copy = shader(COPY_FS, { u_src: { value: null } });
   readonly fill = shader(FILL_FS, { u_value: { value: new THREE.Vector4() } });
@@ -175,6 +175,43 @@ export class SetGPU {
     }
     this.island?.dispose();
     this.island = null;
+    for (const t of this.islandsBySize.values()) t.dispose();
+    this.islandsBySize.clear();
+  }
+
+  /** Mesh maps by name, padded. */
+  readonly baked = new Map<import('@cocoasurface/project').MeshMap, THREE.WebGLRenderTarget>();
+  private islandsBySize = new Map<number, THREE.WebGLRenderTarget>();
+
+  islandAt(size: number): THREE.WebGLRenderTarget {
+    if (size === this.size) return this.islands();
+    let t = this.islandsBySize.get(size);
+    if (!t) {
+      t = rt(size);
+      this.p.clear(t, [0, 0, 0, 1]);
+      this.draw(this.p.island, t);
+      this.islandsBySize.set(size, t);
+    }
+    return t;
+  }
+
+  drawWith(m: THREE.Material, target: THREE.WebGLRenderTarget): void {
+    this.draw(m, target);
+  }
+
+  setBaked(m: import('@cocoasurface/project').MeshMap, fill: (t: THREE.WebGLRenderTarget) => void, size: number): void {
+    let t = this.baked.get(m);
+    if (!t || t.width !== size) {
+      t?.dispose();
+      t = rt(size, true);
+      this.baked.set(m, t);
+    }
+    fill(t);
+  }
+
+  dropBaked(m: import('@cocoasurface/project').MeshMap): void {
+    this.baked.get(m)?.dispose();
+    this.baked.delete(m);
   }
 
   private draw(m: THREE.Material, target: THREE.WebGLRenderTarget): void {
@@ -313,7 +350,9 @@ export class SetGPU {
     for (const c of ch) {
       const info = channelInfo(c);
       let [a, b] = this.work!;
-      this.p.clear(a, [...NEUTRAL[c], 1]);
+      const base = c === 'normal' ? this.baked.get('normal') : undefined;
+      if (base) this.p.copyTo(base.texture, a);
+      else this.p.clear(a, [...NEUTRAL[c], 1]);
       for (const { layer: l, opacity } of order) {
         if (!l.channels.includes(c) || opacity <= 0) continue;
         const u = this.p.layer.uniforms;
@@ -328,6 +367,16 @@ export class SetGPU {
         const mask = l.mask ? liveMask ?? this.target(l.id, 'mask', false) : null;
         u.u_hasMask!.value = mask ? 1 : 0;
         u.u_mask!.value = mask?.texture ?? null;
+        const gen = l.generator ? GENERATOR_SOURCES.find((x) => x.value === l.generator!.source) : undefined;
+        const gt = gen && this.baked.get(gen.map);
+        u.u_hasGen!.value = gt ? 1 : 0;
+        u.u_gen!.value = gt?.texture ?? null;
+        if (gt && l.generator) {
+          u.u_genCh!.value = gen.map === 'position' || gen.map === 'worldNormal' ? 1 : 0;
+          u.u_genLevel!.value = l.generator.level;
+          u.u_genSpread!.value = l.generator.spread;
+          u.u_genInvert!.value = (l.generator.invert ? 1 : 0) ^ (l.generator.source === 'occlusion' ? 1 : 0);
+        }
         if (l.kind === 'paint') {
           const t = (active?.layer === l.id && active.keys.includes(c) ? this.live.get(c) : null) ?? this.target(l.id, c, false);
           if (!t) continue;
@@ -361,6 +410,9 @@ export class SetGPU {
       const h = this.display.get('height');
       f.u_hasHeight!.value = c === 'normal' && h && channels.includes('height') ? 1 : 0;
       f.u_height!.value = c === 'normal' ? (h?.texture ?? null) : null;
+      const ao = c === 'occlusion' ? this.baked.get('occlusion') : undefined;
+      f.u_hasAo!.value = ao ? 1 : 0;
+      f.u_ao!.value = ao?.texture ?? null;
       this.p.run(this.p.final, out);
     }
     for (const [c, t] of this.display)
@@ -376,6 +428,7 @@ export class SetGPU {
     this.work?.forEach((t) => t.dispose());
     this.island?.dispose();
     this.stroke?.dispose();
+    for (const t of [...this.baked.values(), ...this.islandsBySize.values()]) t.dispose();
     for (const m of this.fills.values()) for (const t of m.values()) t.dispose();
   }
 }
