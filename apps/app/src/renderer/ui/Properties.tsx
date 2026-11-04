@@ -255,6 +255,20 @@ function EffectProps({ l, t, w, it }: { l: Layer; t: TextureSet; w: Where; it: E
           {!t.bake?.done.includes(src!.map) && <span className="cs-note warn">Bake the {src!.map === 'worldNormal' ? 'world normal' : src!.map} mesh map to use this.</span>}
           {range('Level', it.generator.level, 0, 1, (v) => ({ generator: { ...it.generator!, level: v } }))}
           {range('Softness', it.generator.spread, 0, 0.5, (v) => ({ generator: { ...it.generator!, spread: v } }))}
+          {range('Noise', it.generator.noise ?? 0, 0, 1, (v) => ({ generator: { ...it.generator!, noise: v } }))}
+          {(it.generator.noise ?? 0) > 0 && (
+            <>
+              {range('Noise size', it.generator.noiseScale ?? 1, 0.1, 4, (v) => ({ generator: { ...it.generator!, noiseScale: v } }), 0.05)}
+              <Field label="Seed">
+                <span className="cs-range">
+                  <NumberField value={it.generator.seed ?? 0} label="" ariaLabel="Seed" onCommit={(v) => putItem({ generator: { ...it.generator!, seed: Math.round(v) } })} />
+                  <Button size="sm" onClick={() => putItem({ generator: { ...it.generator!, seed: Math.floor(Math.random() * 1000) } })}>
+                    New
+                  </Button>
+                </span>
+              </Field>
+            </>
+          )}
           <Field label="Invert">
             <Switch checked={it.generator.invert} label="Invert" onChange={(v) => putItem({ generator: { ...it.generator!, invert: v } })} />
           </Field>

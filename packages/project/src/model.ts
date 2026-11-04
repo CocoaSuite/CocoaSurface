@@ -101,6 +101,10 @@ export interface Generator {
   level: number;
   spread: number;
   invert: boolean;
+  /** Breaks up the edge (edge wear): amount 0–1, size, and a seed. */
+  noise?: number;
+  noiseScale?: number;
+  seed?: number;
 }
 
 export const GENERATOR_SOURCES: { value: Generator['source']; label: string; map: MeshMap }[] = [

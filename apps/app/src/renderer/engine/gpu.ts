@@ -50,11 +50,11 @@ export class Passes {
   readonly commit = shader(COMMIT_FS, { u_dst: { value: null }, u_stroke: { value: null }, u_value: { value: new THREE.Vector4() }, u_opacity: { value: 1 }, u_erase: { value: 0 } });
   readonly mask = shader(MASK_FS, {
     u_below: { value: null }, u_tex: { value: null }, u_src: { value: 0 }, u_blend: { value: 0 }, u_ch: { value: 0 }, u_invert: { value: 0 }, u_vUp: { value: 0 },
-    u_value: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_scale: { value: 1 }, u_radius: { value: 0 }, u_levels: { value: new THREE.Vector3(0, 1, 1) },
+    u_value: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_scale: { value: 1 }, u_radius: { value: 0 }, u_noise: { value: 0 }, u_noiseScale: { value: 1 }, u_seed: { value: 0 }, u_pos: { value: null }, u_hasPos: { value: 0 }, u_levels: { value: new THREE.Vector3(0, 1, 1) },
   });
   readonly effect = shader(EFFECT_FS, {
     u_below: { value: null }, u_tex: { value: null }, u_src: { value: 0 }, u_kind: { value: 0 }, u_blend: { value: 0 }, u_vUp: { value: 0 }, u_flipG: { value: 0 }, u_ch: { value: 0 }, u_invert: { value: 0 },
-    u_value: { value: new THREE.Vector3() }, u_levels: { value: new THREE.Vector3(0, 1, 1) }, u_hsl: { value: new THREE.Vector3() }, u_scale: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_radius: { value: 0 },
+    u_value: { value: new THREE.Vector3() }, u_levels: { value: new THREE.Vector3(0, 1, 1) }, u_hsl: { value: new THREE.Vector3() }, u_scale: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_radius: { value: 0 }, u_noise: { value: 0 }, u_noiseScale: { value: 1 }, u_seed: { value: 0 }, u_pos: { value: null }, u_hasPos: { value: 0 },
   });
   readonly smear = shader(SMEAR_FS, { u_dst: { value: null }, u_stroke: { value: null }, u_mode: { value: 0 }, u_radius: { value: 0 }, u_offset: { value: new THREE.Vector2() }, u_opacity: { value: 1 } });
   readonly pick = shader(PICK_FS, { u_island: { value: -1 } }, ISLAND_VS, { side: THREE.DoubleSide });
@@ -440,6 +440,7 @@ export class SetGPU {
         u.u_ch!.value = src.map === 'position' || src.map === 'worldNormal' ? 1 : 0;
         u.u_level!.value = g.level;
         u.u_spread!.value = g.spread;
+        this.noiseOf(u, g);
         u.u_invert!.value = (g.invert ? 1 : 0) ^ (g.source === 'occlusion' ? 1 : 0);
       } else if (it.kind === 'image' && it.image) {
         const t = image(it.image.file);
@@ -469,6 +470,15 @@ export class SetGPU {
     }
     this.p.copyTo(a.texture, out);
     return out;
+  }
+
+  private noiseOf(u: Record<string, THREE.IUniform>, g: import('@cocoasurface/project').Generator): void {
+    const pos = this.baked.get('position');
+    u.u_noise!.value = g.noise ?? 0;
+    u.u_noiseScale!.value = g.noiseScale ?? 1;
+    u.u_seed!.value = g.seed ?? 0;
+    u.u_pos!.value = pos?.texture ?? null;
+    u.u_hasPos!.value = pos ? 1 : 0;
   }
 
   // Compositing
@@ -657,6 +667,7 @@ export class SetGPU {
         u.u_ch!.value = s.map === 'position' || s.map === 'worldNormal' ? 1 : 0;
         u.u_level!.value = g.level;
         u.u_spread!.value = g.spread;
+        this.noiseOf(u, g);
         u.u_invert!.value = (g.invert ? 1 : 0) ^ (g.source === 'occlusion' ? 1 : 0);
       } else if (e.kind === 'image' && e.image) {
         const t = ctx.image(e.image.file);

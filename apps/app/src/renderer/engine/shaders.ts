@@ -41,6 +41,28 @@ vec4 blurred(sampler2D t, vec2 uv, float r) {
   return sum.a > 0. ? vec4(sum.rgb / sum.a, sum.a / w) : vec4(texture(t, uv).rgb, 0.);
 }`;
 
+const NOISE = /* glsl */ `
+uniform float u_noise;
+uniform float u_noiseScale;
+uniform float u_seed;
+uniform sampler2D u_pos;
+uniform int u_hasPos;
+float hash3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7)) + u_seed * 17.13) * 43758.5453); }
+float vnoise(vec3 p) {
+  vec3 i = floor(p), f = fract(p);
+  f = f * f * (3. - 2. * f);
+  return mix(mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), f.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), f.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+// Breaks up a generator's edge. Seamless on the model when the position map is baked.
+float grain(vec2 uv) {
+  if (u_noise <= 0.) return 0.;
+  vec3 p = (u_hasPos == 1 ? texture(u_pos, uv).rgb : vec3(uv, 0.)) * 8. / max(u_noiseScale, .01);
+  float n = 0., a = .5;
+  for (int i = 0; i < 4; i++) { n += vnoise(p) * a; p *= 2.03; a *= .5; }
+  return (n / .9375 - .5) * 2. * u_noise;
+}`;
+
 /** One layer over what's below it, for one channel. 8 is an internal blend: replace (groups passing through). */
 export const LAYER_FS = /* glsl */ `
 precision highp float;
@@ -105,6 +127,7 @@ uniform float u_spread;
 uniform float u_radius;
 ${BLEND}
 ${BLUR}
+${NOISE}
 
 vec3 rgb2hsv(vec3 c) {
   vec4 K = vec4(0., -1. / 3., 2. / 3., -1.);
@@ -152,6 +175,7 @@ void main() {
     vec4 g = texture(u_tex, vUv);
     float v = u_ch == 1 ? g.g : g.r;
     if (u_invert == 1) v = 1. - v;
+    v += grain(vUv);
     s = vec3(smoothstep(u_level - u_spread, u_level + u_spread + 1e-4, v));
   } else if (u_src == 4) {
     vec2 st = vUv * u_scale;
@@ -398,6 +422,7 @@ uniform float u_scale;
 uniform float u_radius;
 uniform vec3 u_levels;
 ${BLUR}
+${NOISE}
 void main() {
   float b = texture(u_below, vUv).r;
   if (u_src >= 10) {
@@ -417,6 +442,7 @@ void main() {
     vec4 g = texture(u_tex, vUv);
     float v = u_ch == 1 ? g.g : g.r;
     if (u_invert == 1) v = 1. - v;
+    v += grain(vUv);
     s = smoothstep(u_level - u_spread, u_level + u_spread + 1e-4, v);
   } else if (u_src == 3) {
     vec2 st = vUv * u_scale;
