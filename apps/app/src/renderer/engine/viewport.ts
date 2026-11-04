@@ -24,7 +24,8 @@ export class Viewport {
   private lightDrag: { x: number; turn: number } | null = null;
   private envTex: THREE.Texture;
   private pm: THREE.PMREMGenerator;
-  private envs = new Map<string, { light: THREE.Texture; sky: THREE.Texture | null }>();
+  private envs = new Map<string, { light: THREE.Texture; sky: THREE.Texture | null; up?: THREE.Color; down?: THREE.Color }>();
+  private fill = new THREE.HemisphereLight(0xffffff, 0x000000, 0);
   private envLoading = new Set<string>();
   private needs = true;
   private raf = 0;
@@ -40,7 +41,7 @@ export class Viewport {
   constructor(readonly host: HTMLElement) {
     this.r = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.r.setPixelRatio(Math.min(2, window.devicePixelRatio));
-    this.r.toneMapping = THREE.AgXToneMapping;
+    this.r.toneMapping = THREE.NeutralToneMapping;
     this.r.outputColorSpace = THREE.SRGBColorSpace;
     this.r.setClearColor(0x1b1b1b, 1);
     host.appendChild(this.r.domElement);
@@ -49,7 +50,7 @@ export class Viewport {
     this.envTex = this.pm.fromScene(new RoomEnvironment(), 0.04).texture;
     this.envs.set('studio', { light: this.envTex, sky: null });
     this.scene.environment = this.envTex;
-    this.scene.add(this.grid, this.wire, this.cage);
+    this.scene.add(this.grid, this.wire, this.cage, this.fill);
     this.grid.position.y = -1;
     this.persp.position.set(0, 0.3, 3.4);
     this.ortho.position.copy(this.persp.position);
@@ -171,8 +172,13 @@ export class Viewport {
     this.scene.backgroundRotation.copy(this.scene.environmentRotation);
     const env = this.environment(v.env);
     if (env) this.scene.environment = env.light;
-    // The skies are ordinary pictures, not HDR, so they need more strength to light like the studio.
-    this.scene.environmentIntensity = v.light * (env?.sky ? 1.8 : 1);
+    // The skies are ordinary pictures, not HDR: their diffuse light is topped up with a sky/ground fill,
+    // which adds no reflections, so colours aren't washed out by the sky's glare.
+    if (env?.up && env.down) {
+      this.fill.color.copy(env.up);
+      this.fill.groundColor.copy(env.down);
+      this.fill.intensity = v.light * 3;
+    } else this.fill.intensity = 0;
     this.scene.background = v.showEnv && env ? (env.sky ?? env.light) : null;
     this.scene.backgroundBlurriness = env && !env.sky ? 0.5 : 0;
     const m = engine.model;
@@ -199,14 +205,26 @@ export class Viewport {
   }
 
   /** An environment's lighting and sky, loaded the first time it's used. */
-  private environment(id: string): { light: THREE.Texture; sky: THREE.Texture | null } | null {
+  private environment(id: string): { light: THREE.Texture; sky: THREE.Texture | null; up?: THREE.Color; down?: THREE.Color } | null {
     const e = this.envs.get(id);
     if (e || this.envLoading.has(id)) return e ?? null;
     this.envLoading.add(id);
     new THREE.TextureLoader().load(`./env/${id}.jpg`, (sky) => {
       sky.mapping = THREE.EquirectangularReflectionMapping;
       sky.colorSpace = THREE.SRGBColorSpace;
-      this.envs.set(id, { light: this.pm.fromEquirectangular(sky).texture, sky });
+      const c = document.createElement('canvas');
+      c.width = 32;
+      c.height = 16;
+      const x = c.getContext('2d')!;
+      x.drawImage(sky.image as CanvasImageSource, 0, 0, 32, 16);
+      const avg = (y0: number) => {
+        const d = x.getImageData(0, y0, 32, 8).data;
+        let r = 0, g = 0, b = 0;
+        for (let i = 0; i < d.length; i += 4) (r += d[i]!), (g += d[i + 1]!), (b += d[i + 2]!);
+        const n = d.length / 4;
+        return new THREE.Color().setRGB(r / n / 255, g / n / 255, b / n / 255, THREE.SRGBColorSpace);
+      };
+      this.envs.set(id, { light: this.pm.fromEquirectangular(sky).texture, sky, up: avg(0), down: avg(8) });
       this.envLoading.delete(id);
       this.applyView();
     });
