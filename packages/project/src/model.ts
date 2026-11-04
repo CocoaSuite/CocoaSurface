@@ -130,6 +130,8 @@ interface LayerBase {
   channels: Channel[];
   /** Where the layer shows: white shows it, black hides it. */
   mask: Mask | null;
+  /** Steps that change what the layer puts in its channels, top first. Not on groups. */
+  effects?: Effect[];
 }
 
 export type MaskBlend = 'normal' | 'multiply' | 'add' | 'subtract' | 'lighten' | 'darken';
@@ -142,32 +144,67 @@ export const MASK_BLENDS: { value: MaskBlend; label: string }[] = [
   { value: 'darken', label: 'Darken' },
 ];
 
-/** One step of a mask, like Substance Painter's mask effects. */
-export interface MaskItem {
+export type EffectKind = 'paint' | 'generator' | 'image' | 'fill' | 'levels' | 'blur' | 'invert' | 'hsl';
+
+export const EFFECT_KINDS: { kind: EffectKind; label: string; mask: boolean }[] = [
+  { kind: 'paint', label: 'Paint', mask: true },
+  { kind: 'fill', label: 'Fill', mask: true },
+  { kind: 'generator', label: 'Generator', mask: true },
+  { kind: 'image', label: 'Image', mask: true },
+  { kind: 'levels', label: 'Levels', mask: true },
+  { kind: 'blur', label: 'Blur', mask: true },
+  { kind: 'invert', label: 'Invert', mask: true },
+  { kind: 'hsl', label: 'Hue and saturation', mask: false },
+];
+
+/** A filter or source on a layer or in a mask, like Substance Painter's effects. Mask effects use mask blends. */
+export interface Effect {
   id: string;
   name: string;
-  /** paint: painted strokes (pixels stored under the item's id); generator: from mesh maps; image: a picture; fill: one grey value. */
-  kind: 'paint' | 'generator' | 'image' | 'fill';
+  /** paint: strokes (pixels under the effect's id); generator: from mesh maps; image: a picture; fill: a value; the rest change what's below. */
+  kind: EffectKind;
   visible: boolean;
   opacity: number;
-  blend: MaskBlend;
+  blend: BlendMode;
   generator?: Generator;
   image?: { file: string; name: string; scale: number; invert: boolean };
+  /** Fill in a mask. */
   value?: number;
+  /** Fill on a layer. */
+  flat?: FlatValues;
+  levels?: { low: number; high: number; gamma: number };
+  /** Radius as a share of the texture. */
+  radius?: number;
+  hsl?: { hue: number; saturation: number; lightness: number };
 }
 
-/** A layer's mask: black or white to start with, then its items, top first. */
+export type MaskItem = Effect;
+
+/** A layer's mask: black or white to start with, then its effects, top first. */
 export interface Mask {
   base: 0 | 1;
-  items: MaskItem[];
+  items: Effect[];
 }
 
-export function newMaskItem(kind: MaskItem['kind'], extra: Partial<MaskItem> = {}): MaskItem {
-  const names = { paint: 'Paint', generator: 'Generator', image: 'Image', fill: 'Fill' };
-  const it: MaskItem = { id: uid(), name: names[kind], kind, visible: true, opacity: 1, blend: kind === 'generator' ? 'normal' : 'normal', ...extra };
-  if (kind === 'generator' && !it.generator) it.generator = { source: 'curvature', level: 0.6, spread: 0.1, invert: false };
-  if (kind === 'fill' && it.value === undefined) it.value = 1;
-  return it;
+export function newEffect(kind: EffectKind, extra: Partial<Effect> = {}): Effect {
+  const e: Effect = { id: uid(), name: EFFECT_KINDS.find((x) => x.kind === kind)!.label, kind, visible: true, opacity: 1, blend: 'normal', ...extra };
+  if (kind === 'generator' && !e.generator) e.generator = { source: 'curvature', level: 0.6, spread: 0.1, invert: false };
+  if (kind === 'levels' && !e.levels) e.levels = { low: 0, high: 1, gamma: 1 };
+  if (kind === 'blur' && e.radius === undefined) e.radius = 0.005;
+  if (kind === 'hsl' && !e.hsl) e.hsl = { hue: 0, saturation: 0, lightness: 0 };
+  return e;
+}
+
+export function newMaskItem(kind: EffectKind, extra: Partial<Effect> = {}): Effect {
+  const e = newEffect(kind, extra);
+  if (kind === 'fill' && e.value === undefined) e.value = 1;
+  return e;
+}
+
+export function newLayerEffect(kind: EffectKind, extra: Partial<Effect> = {}): Effect {
+  const e = newEffect(kind, extra);
+  if (kind === 'fill' && !e.flat) e.flat = { ...FLAT_DEFAULTS };
+  return e;
 }
 
 export interface PaintLayer extends LayerBase {

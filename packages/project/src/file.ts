@@ -39,6 +39,7 @@ function checkLayer(l: unknown): string | null {
     }
   }
   if (l.kind === 'fill' && !isObj(l.flat)) return `The fill layer “${l.name}” is broken.`;
+  if (l.effects !== undefined && (!Array.isArray(l.effects) || l.effects.some((e) => !isObj(e) || typeof e.id !== 'string'))) return `The effects of “${l.name}” are broken.`;
   return null;
 }
 

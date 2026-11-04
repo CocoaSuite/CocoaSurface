@@ -56,6 +56,9 @@ const P = {
   trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
   symmetry: 'M12 3v18M8 7 3 12l5 5zM16 7l5 5-5 5z',
   focus: 'M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+  smudge: 'M8 20c-2.2 0-4-1.8-4-4V9a1.5 1.5 0 0 1 3 0v3V5a1.5 1.5 0 0 1 3 0v6V4a1.5 1.5 0 0 1 3 0v7V6a1.5 1.5 0 0 1 3 0v9c0 2.8-2.2 5-5 5z',
+  blur: 'M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11zM9 14a3 3 0 0 0 3 3',
+  effect: 'M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18',
 } as const;
 
 export type IconName = keyof typeof P;

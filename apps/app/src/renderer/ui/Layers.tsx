@@ -46,7 +46,7 @@ export const MASK_ROOT = '#mask';
 
 export function setMask(base: 0 | 1 | null): void {
   const l = currentLayer();
-  if (!l || l.kind === 'group') return;
+  if (!l) return;
   if (base === null) {
     editSet(`Remove the mask of ${l.name}`, (s) => ({ ...s, layers: updateLayer(s.layers, l.id, (x) => ({ ...x, mask: null })) }));
     set({ maskItem: null });
@@ -55,6 +55,31 @@ export function setMask(base: 0 | 1 | null): void {
   const paint = newMaskItem('paint');
   editSet(`Add a ${base ? 'white' : 'black'} mask to ${l.name}`, (s) => ({ ...s, layers: updateLayer(s.layers, l.id, (x) => ({ ...x, mask: { base, items: [paint] } })) }));
   set((s) => ({ maskItem: paint.id, brush: { ...s.brush, maskValue: base ? 0 : 1 } }));
+}
+
+const ICON = { paint: 'brush', image: 'image', fill: 'fill', generator: 'layers', levels: 'effect', blur: 'blur', invert: 'effect', hsl: 'effect' } as const;
+
+function EffectRows({ l, depth }: { l: Layer; depth: number }) {
+  const effect = useApp((s) => s.effect);
+  const layerId = useApp((s) => s.layerId);
+  if (!l.effects?.length || l.id !== layerId) return null;
+  const toggle = (id: string) => editSet('Toggle an effect', (s) => ({ ...s, layers: updateLayer(s.layers, l.id, (x) => ({ ...x, effects: x.effects?.map((m) => (m.id === id ? { ...m, visible: !m.visible } : m)) })) }));
+  return (
+    <>
+      {l.effects.map((m) => (
+        <div key={m.id} className={`cs-lr${effect === m.id ? ' on' : ''}${m.visible ? '' : ' off'}`} style={{ paddingLeft: 36 + depth * 14 }} onClick={() => set({ effect: m.id, maskItem: null })}>
+          <span className="cs-ls">
+            <Icon name={ICON[m.kind]} />
+          </span>
+          <span className="cs-ln">{m.name}</span>
+          {m.blend !== 'normal' && <span className="cs-meta">{m.blend}</span>}
+          <button type="button" className={`cs-lb${m.visible ? '' : ' set'}`} aria-label={m.visible ? 'Hide' : 'Show'} onClick={(e) => (e.stopPropagation(), toggle(m.id))}>
+            <Icon name={m.visible ? 'eye' : 'eyeOff'} />
+          </button>
+        </div>
+      ))}
+    </>
+  );
 }
 
 function MaskRows({ l, depth }: { l: Layer; depth: number }) {
@@ -71,7 +96,7 @@ function MaskRows({ l, depth }: { l: Layer; depth: number }) {
       {l.mask.items.map((m) => (
         <div key={m.id} className={`cs-lr${maskItem === m.id ? ' on' : ''}${m.visible ? '' : ' off'}`} style={{ paddingLeft: 36 + depth * 14 }} onClick={() => set({ maskItem: m.id })}>
           <span className="cs-ls">
-            <Icon name={m.kind === 'paint' ? 'brush' : m.kind === 'image' ? 'image' : m.kind === 'fill' ? 'fill' : 'layers'} />
+            <Icon name={ICON[m.kind]} />
           </span>
           <span className="cs-ln">{m.name}</span>
           {m.blend !== 'normal' && <span className="cs-meta">{m.blend}</span>}
@@ -88,6 +113,7 @@ function Row({ l, depth, drag, setDrag }: { l: Layer; depth: number; drag: strin
   const layerId = useApp((s) => s.layerId);
   const maskItem = useApp((s) => s.maskItem);
   const maskEdit = maskItem !== null;
+  const effectSel = useApp((s) => s.effect) !== null;
   const [rename, setRename] = useState(false);
   const [drop, setDrop] = useState<'before' | 'after' | 'into' | null>(null);
   const flip = (k: 'visible' | 'locked' | 'open') => editSet(`${k === 'visible' ? (l.visible ? 'Hide' : 'Show') : k === 'locked' ? (l.locked ? 'Unlock' : 'Lock') : 'Toggle'} ${l.name}`, (s) => ({ ...s, layers: updateLayer(s.layers, l.id, (x) => ({ ...x, [k]: !(x as unknown as Record<string, boolean>)[k] })) }));
@@ -121,13 +147,13 @@ function Row({ l, depth, drag, setDrag }: { l: Layer; depth: number; drag: strin
           const to: Place = w === 'into' ? { parent: l.id, index: 0 } : { parent: p.parent, index: p.index + (w === 'after' ? 1 : 0) };
           editSet('Move layer', (s) => ({ ...s, layers: moveLayer(s.layers, drag, to) }));
         }}
-        onClick={() => set({ layerId: l.id, maskItem: null })}
+        onClick={() => set({ layerId: l.id, maskItem: null, effect: null })}
       >
         {l.kind === 'group' ? <button type="button" className={`cs-cx${l.open ? ' o' : ''}`} aria-label={l.open ? 'Collapse' : 'Expand'} onClick={(e) => (e.stopPropagation(), flip('open'))} /> : <span style={{ width: 14 }} />}
         {l.kind === 'fill' && !l.use ? (
-          <span className={`cs-swatch${l.id === layerId && !maskEdit ? ' on' : ''}`} style={{ background: l.flat.color }} />
+          <span className={`cs-swatch${l.id === layerId && !maskEdit && !effectSel ? ' on' : ''}`} style={{ background: l.flat.color }} />
         ) : swatch ? (
-          <span className={`cs-swatch${l.id === layerId && !maskEdit ? ' on' : ''}`} style={{ backgroundImage: `url(${swatch})` }} />
+          <span className={`cs-swatch${l.id === layerId && !maskEdit && !effectSel ? ' on' : ''}`} style={{ backgroundImage: `url(${swatch})` }} />
         ) : (
           <span className="cs-ls">
             <Icon name={l.kind === 'paint' ? 'brush' : l.kind === 'group' ? 'folder' : 'fill'} />
@@ -164,6 +190,7 @@ function Row({ l, depth, drag, setDrag }: { l: Layer; depth: number; drag: strin
           <Icon name={l.visible ? 'eye' : 'eyeOff'} />
         </button>
       </div>
+      <EffectRows l={l} depth={depth} />
       <MaskRows l={l} depth={depth} />
       {l.kind === 'group' && l.open && l.children.map((c) => <Row key={c.id} l={c} depth={depth + 1} drag={drag} setDrag={setDrag} />)}
     </>
@@ -187,7 +214,7 @@ export function Layers() {
           <IconButton
             icon="mask"
             label="Mask"
-            disabled={!l || l.kind === 'group'}
+            disabled={!l}
             onClick={(e) => {
               const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
               setMenu({ x: r.left, y: r.bottom + 4 });

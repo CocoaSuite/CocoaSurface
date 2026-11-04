@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
-import { BLEND_MODES, GENERATOR_SOURCES, MASK_BLENDS, type Mask, channelInfo, type Channel, type FillLayer, type Layer, type TextureSet } from '@cocoasurface/project';
+import { BLEND_MODES, GENERATOR_SOURCES, MASK_BLENDS, type Effect, type FlatValues, type Mask, channelInfo, type Channel, type FillLayer, type Layer, type TextureSet } from '@cocoasurface/project';
 import type { Part } from './model';
 import type { RoleTextures } from './library';
-import { COMMIT_FS, COPY_FS, MASK_FS, DAB_FS, DIST_FS, DIST_VS, FILL_FS, FINAL_FS, ISLAND_FS, LAYER_FS, MAX_DABS, QUAD_VS, UV_VS } from './shaders';
+import { COMMIT_FS, COPY_FS, DAB_FS, DIST_FS, DIST_VS, EFFECT_FS, FILL_FS, FINAL_FS, ISLAND_FS, ISLAND_VS, LAYER_FS, MASK_FS, MAX_DABS, PICK_FS, QUAD_VS, SMEAR_FS, UV_VS } from './shaders';
 
 export type Key = Channel | 'grey' | 'skew' | 'offset';
 /** Pixels painted for baking (skew and offset) live under this layer id. */
@@ -50,8 +50,14 @@ export class Passes {
   readonly commit = shader(COMMIT_FS, { u_dst: { value: null }, u_stroke: { value: null }, u_value: { value: new THREE.Vector4() }, u_opacity: { value: 1 }, u_erase: { value: 0 } });
   readonly mask = shader(MASK_FS, {
     u_below: { value: null }, u_tex: { value: null }, u_src: { value: 0 }, u_blend: { value: 0 }, u_ch: { value: 0 }, u_invert: { value: 0 }, u_vUp: { value: 0 },
-    u_value: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_scale: { value: 1 },
+    u_value: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_scale: { value: 1 }, u_radius: { value: 0 }, u_levels: { value: new THREE.Vector3(0, 1, 1) },
   });
+  readonly effect = shader(EFFECT_FS, {
+    u_below: { value: null }, u_tex: { value: null }, u_src: { value: 0 }, u_kind: { value: 0 }, u_blend: { value: 0 }, u_vUp: { value: 0 }, u_flipG: { value: 0 }, u_ch: { value: 0 }, u_invert: { value: 0 },
+    u_value: { value: new THREE.Vector3() }, u_levels: { value: new THREE.Vector3(0, 1, 1) }, u_hsl: { value: new THREE.Vector3() }, u_scale: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_radius: { value: 0 },
+  });
+  readonly smear = shader(SMEAR_FS, { u_dst: { value: null }, u_stroke: { value: null }, u_mode: { value: 0 }, u_radius: { value: 0 }, u_offset: { value: new THREE.Vector2() }, u_opacity: { value: 1 } });
+  readonly pick = shader(PICK_FS, { u_island: { value: -1 } }, ISLAND_VS, { side: THREE.DoubleSide });
   readonly copy = shader(COPY_FS, { u_src: { value: null } });
   readonly fill = shader(FILL_FS, { u_value: { value: new THREE.Vector4() } });
   readonly island = shader(ISLAND_FS, {}, UV_VS, { side: THREE.DoubleSide });
@@ -59,8 +65,9 @@ export class Passes {
     DAB_FS,
     {
       u_viewProj: { value: new THREE.Matrix4() }, u_camPos: { value: new THREE.Vector3() }, u_camDir: { value: new THREE.Vector3() }, u_ortho: { value: 0 },
-      u_screen: { value: new THREE.Vector2() }, u_depth: { value: null }, u_dabs: { value: Array.from({ length: MAX_DABS }, () => new THREE.Vector3()) },
-      u_count: { value: 0 }, u_hardness: { value: 0.5 }, u_flow: { value: 1 },
+      u_screen: { value: new THREE.Vector2() }, u_depth: { value: null }, u_dabs: { value: Array.from({ length: MAX_DABS }, () => new THREE.Vector4()) },
+      u_count: { value: 0 }, u_hardness: { value: 0.5 }, u_flow: { value: 1 }, u_shape: { value: 0 }, u_angle: { value: 0 }, u_alpha: { value: null },
+      u_hasStencil: { value: 0 }, u_stencil: { value: null }, u_stencilAt: { value: new THREE.Vector4() }, u_stencilAspect: { value: 1 },
     },
     UV_VS,
     { side: THREE.DoubleSide, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcColorFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor },
@@ -144,6 +151,16 @@ export interface StrokeOptions {
   values: Map<Key, [number, number, number, number]>;
   opacity: number;
   erase: boolean;
+}
+
+/** How a brush dab looks: its tip and the stencil it paints through. */
+export interface Tip {
+  hardness: number;
+  flow: number;
+  shape: 0 | 1 | 2;
+  angle: number;
+  alpha: THREE.Texture | null;
+  stencil: { tex: THREE.Texture; at: THREE.Vector4; aspect: number } | null;
 }
 
 /** One texture set on the graphics card: painted pixels, the composited channels and their finished maps. */
@@ -304,7 +321,7 @@ export class SetGPU {
     this.p.clear(this.stroke, [0, 0, 0, 0]);
   }
 
-  dabs(camera: THREE.Camera, screen: THREE.Vector2, dabs: THREE.Vector3[], hardness: number, flow: number): void {
+  dabs(camera: THREE.Camera, screen: THREE.Vector2, dabs: THREE.Vector4[], tip: Tip): void {
     const u = this.p.dab.uniforms;
     (u.u_viewProj!.value as THREE.Matrix4).multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     camera.getWorldPosition(u.u_camPos!.value);
@@ -312,14 +329,49 @@ export class SetGPU {
     u.u_ortho!.value = (camera as THREE.OrthographicCamera).isOrthographicCamera ? 1 : 0;
     (u.u_screen!.value as THREE.Vector2).copy(screen);
     u.u_depth!.value = this.p.depth!.texture;
-    u.u_hardness!.value = Math.min(0.999, hardness);
-    u.u_flow!.value = flow;
+    u.u_hardness!.value = Math.min(0.999, tip.hardness);
+    u.u_flow!.value = tip.flow;
+    u.u_shape!.value = tip.alpha ? tip.shape : Math.min(tip.shape, 1);
+    u.u_angle!.value = tip.angle;
+    u.u_alpha!.value = tip.alpha;
+    u.u_hasStencil!.value = tip.stencil ? 1 : 0;
+    u.u_stencil!.value = tip.stencil?.tex ?? null;
+    if (tip.stencil) {
+      (u.u_stencilAt!.value as THREE.Vector4).copy(tip.stencil.at);
+      u.u_stencilAspect!.value = tip.stencil.aspect;
+    }
     for (let i = 0; i < dabs.length; i += MAX_DABS) {
       const batch = dabs.slice(i, i + MAX_DABS);
-      batch.forEach((d, j) => (u.u_dabs!.value as THREE.Vector3[])[j]!.copy(d));
+      batch.forEach((d, j) => (u.u_dabs!.value as THREE.Vector4[])[j]!.copy(d));
       u.u_count!.value = batch.length;
       this.draw(this.p.dab, this.stroke!);
     }
+  }
+
+  /** The fill tool: a whole UV island of a part (or the whole part) becomes the stroke. */
+  fillPart(part: number, island: number): void {
+    this.p.pick.uniforms.u_island!.value = island;
+    this.draw(this.p.pick, this.stroke!, part);
+  }
+
+  /** Smudge or blur what this frame's dabs cover, into `live`, then start the next frame's dabs afresh. */
+  smearStroke(o: StrokeOptions, mode: 0 | 1, radius: number, offset: THREE.Vector2): void {
+    const u = this.p.smear.uniforms;
+    for (const key of o.values.keys()) {
+      const prev = this.live.get(key);
+      const src = prev ?? this.target(o.layer, key)!;
+      const out = rt(this.size);
+      u.u_dst!.value = src.texture;
+      u.u_stroke!.value = this.stroke!.texture;
+      u.u_mode!.value = mode;
+      u.u_radius!.value = radius;
+      (u.u_offset!.value as THREE.Vector2).copy(offset);
+      u.u_opacity!.value = o.opacity;
+      this.p.run(this.p.smear, out);
+      prev?.dispose();
+      this.live.set(key, out);
+    }
+    this.p.clear(this.stroke!, [0, 0, 0, 0]);
   }
 
   /** The stroke so far, on top of the layer's pixels, into `live` (shown while drawing). */
@@ -396,10 +448,17 @@ export class SetGPU {
         u.u_tex!.value = t;
         u.u_scale!.value = it.image.scale;
         u.u_invert!.value = it.image.invert ? 1 : 0;
-      } else {
+      } else if (it.kind === 'levels' && it.levels) {
+        u.u_src!.value = 10;
+        (u.u_levels!.value as THREE.Vector3).set(it.levels.low, it.levels.high, it.levels.gamma);
+      } else if (it.kind === 'invert') u.u_src!.value = 11;
+      else if (it.kind === 'blur') {
+        u.u_src!.value = 13;
+        u.u_radius!.value = it.radius ?? 0.005;
+      } else if (it.kind === 'fill') {
         u.u_src!.value = 0;
         u.u_value!.value = it.value ?? 1;
-      }
+      } else continue;
       this.p.run(this.p.mask, b);
       [a, b] = [b, a];
     }
@@ -414,54 +473,40 @@ export class SetGPU {
 
   // Compositing
 
+  private levels: [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget][] = [];
+  private fxWork: [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget] | null = null;
+
+  /** Work targets for groups nested `depth` deep. */
+  private level(depth: number): [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget] {
+    if (depth === 0) return this.work!;
+    let w = this.levels[depth];
+    if (!w || w[0].width !== this.size) {
+      w?.forEach((t) => t.dispose());
+      this.levels[depth] = w = [rt(this.size), rt(this.size)];
+    }
+    return w;
+  }
+
   composite(layers: Layer[], channels: Channel[], bump: number, only: Channel[] | null, active: { layer: string; keys: Key[] } | null, fillTextures: (l: FillLayer) => { tex: RoleTextures; surface: Record<string, unknown> } | null, image: (file: string) => THREE.Texture | null = () => null): void {
     this.ensure();
     const island = this.islands();
-    const order = flatten(layers).reverse();
     const masks = new Map<string, THREE.WebGLRenderTarget>();
-    for (const { layer: l } of order) if (l.mask) masks.set(l.id, this.maskOf(l.id, l.mask, active, image));
+    const visit = (ls: Layer[]) => {
+      for (const l of ls) {
+        if (!l.visible) continue;
+        if (l.mask) masks.set(l.id, this.maskOf(l.id, l.mask, active, image));
+        if (l.kind === 'group') visit(l.children);
+      }
+    };
+    visit(layers);
     const ch = [...(only ?? channels)].filter((c) => channels.includes(c)).sort((a, b) => (a === 'height' ? -1 : b === 'height' ? 1 : 0));
     for (const c of ch) {
       const info = channelInfo(c);
-      let [a, b] = this.work!;
+      const w = this.level(0);
       const base = c === 'normal' ? this.baked.get('normal') : undefined;
-      if (base) this.p.copyTo(base.texture, a);
-      else this.p.clear(a, [...NEUTRAL[c], 1]);
-      for (const { layer: l, opacity } of order) {
-        if (!l.channels.includes(c) || opacity <= 0) continue;
-        const u = this.p.layer.uniforms;
-        u.u_below!.value = a.texture;
-        u.u_kind!.value = KIND[info.kind];
-        u.u_blend!.value = BLEND_MODES.findIndex((m) => m.value === l.blend);
-        u.u_opacity!.value = opacity;
-        u.u_vUp!.value = this.vUp ? 1 : 0;
-        u.u_flipG!.value = 0;
-        u.u_tex!.value = null;
-        const mask = l.mask ? masks.get(l.id) : null;
-        u.u_hasMask!.value = mask ? 1 : 0;
-        u.u_mask!.value = mask?.texture ?? null;
-        if (l.kind === 'paint') {
-          const t = (active?.layer === l.id && active.keys.includes(c) ? this.live.get(c) : null) ?? this.target(l.id, c, false);
-          if (!t) continue;
-          u.u_src!.value = 1;
-          u.u_tex!.value = t.texture;
-        } else if (l.kind === 'fill') {
-          const f = l.use ? fillTextures(l) : null;
-          const tex = f?.tex.get(c);
-          (u.u_value!.value as THREE.Vector3).set(...flatValue(l, c, f?.surface));
-          if (tex) {
-            u.u_src!.value = 2;
-            u.u_tex!.value = tex;
-            u.u_scale!.value = l.use!.scale;
-            u.u_flipG!.value = c === 'normal' && this.vUp ? 1 : 0;
-          } else {
-            u.u_src!.value = 0;
-            if (c === 'normal') (u.u_value!.value as THREE.Vector3).set(0.5, 0.5, 1);
-          }
-        } else continue;
-        this.p.run(this.p.layer, b);
-        [a, b] = [b, a];
-      }
+      if (base) this.p.copyTo(base.texture, w[0]);
+      else this.p.clear(w[0], [...NEUTRAL[c], 1]);
+      const a = this.stack(layers, c, KIND[info.kind], w, w[0], 0, { masks, active, fillTextures, image });
       let out = this.display.get(c);
       if (!out) this.display.set(c, (out = rt(this.size, true)));
       const f = this.p.final.uniforms;
@@ -485,6 +530,161 @@ export class SetGPU {
       }
   }
 
+  /** Layers bottom to top over `a` (one of `pair`); returns the target holding the result. */
+  private stack(layers: Layer[], c: Channel, kind: number, pair: [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget], a: THREE.WebGLRenderTarget, depth: number, ctx: Ctx): THREE.WebGLRenderTarget {
+    const u = this.p.layer.uniforms;
+    for (const l of [...layers].reverse()) {
+      if (!l.visible || l.opacity <= 0) continue;
+      const b = a === pair[0] ? pair[1] : pair[0];
+      let src: 0 | 1 | 2 | 3, tex: THREE.Texture | null = null, blend = BLEND_MODES.findIndex((m) => m.value === l.blend);
+      u.u_flipG!.value = 0;
+      if (l.kind === 'group') {
+        // Normal groups pass through: their layers blend with what's below, then the mask and opacity mix that in.
+        const inner = this.level(depth + 1);
+        const through = l.blend === 'normal';
+        if (through) this.p.copyTo(a.texture, inner[0]);
+        else this.p.clear(inner[0], c === 'normal' ? [0.5, 0.5, 1, 0] : [...NEUTRAL[c], 0]);
+        tex = this.stack(l.children, c, kind, inner, inner[0], depth + 1, ctx).texture;
+        src = 3;
+        if (through) blend = 8;
+      } else {
+        if (!l.channels.includes(c)) continue;
+        const fx = l.effects?.filter((e) => e.visible && e.opacity > 0) ?? [];
+        if (fx.length) {
+          const t = this.content(l, fx, c, kind, ctx);
+          if (!t) continue;
+          src = 3;
+          tex = t.texture;
+        } else if (l.kind === 'paint') {
+          const t = this.painted(l.id, c, ctx.active);
+          if (!t) continue;
+          src = 1;
+          tex = t.texture;
+        } else {
+          const f = l.use ? ctx.fillTextures(l) : null;
+          const mt = f?.tex.get(c);
+          (u.u_value!.value as THREE.Vector3).set(...flatValue(l.flat, c, f?.surface));
+          if (mt) {
+            src = 2;
+            tex = mt;
+            u.u_scale!.value = l.use!.scale;
+            u.u_flipG!.value = c === 'normal' && this.vUp ? 1 : 0;
+          } else src = 0;
+        }
+      }
+      u.u_below!.value = a.texture;
+      u.u_kind!.value = kind;
+      u.u_blend!.value = blend;
+      u.u_opacity!.value = l.opacity;
+      u.u_vUp!.value = this.vUp ? 1 : 0;
+      u.u_src!.value = src;
+      u.u_tex!.value = tex;
+      const mask = ctx.masks.get(l.id);
+      u.u_hasMask!.value = mask ? 1 : 0;
+      u.u_mask!.value = mask?.texture ?? null;
+      this.p.run(this.p.layer, b);
+      a = b;
+    }
+    return a;
+  }
+
+  private painted(id: string, c: Key, active: Ctx['active']): THREE.WebGLRenderTarget | null {
+    return (active?.layer === id && active.keys.includes(c) ? this.live.get(c) : null) ?? this.target(id, c, false);
+  }
+
+  /** What a layer with effects puts in a channel: its own content, then its effects bottom to top. */
+  private content(l: Layer, fx: Effect[], c: Channel, kind: number, ctx: Ctx): THREE.WebGLRenderTarget | null {
+    if (!this.fxWork || this.fxWork[0].width !== this.size) {
+      this.fxWork?.forEach((t) => t.dispose());
+      this.fxWork = [rt(this.size), rt(this.size)];
+    }
+    let [a, b] = this.fxWork;
+    this.p.clear(a, c === 'normal' ? [0.5, 0.5, 1, 0] : [...NEUTRAL[c], 0]);
+    const u = this.p.effect.uniforms;
+    const pass = () => {
+      u.u_below!.value = a.texture;
+      u.u_kind!.value = kind;
+      u.u_vUp!.value = this.vUp ? 1 : 0;
+      this.p.run(this.p.effect, b);
+      [a, b] = [b, a];
+    };
+    u.u_blend!.value = 0;
+    u.u_opacity!.value = 1;
+    u.u_flipG!.value = 0;
+    u.u_invert!.value = 0;
+    if (l.kind === 'paint') {
+      const t = this.painted(l.id, c, ctx.active);
+      if (t) {
+        u.u_src!.value = 1;
+        u.u_tex!.value = t.texture;
+        pass();
+      }
+    } else if (l.kind === 'fill') {
+      const f = l.use ? ctx.fillTextures(l) : null;
+      const mt = f?.tex.get(c);
+      (u.u_value!.value as THREE.Vector3).set(...flatValue(l.flat, c, f?.surface));
+      u.u_src!.value = mt ? 2 : 0;
+      u.u_tex!.value = mt ?? null;
+      if (mt) {
+        u.u_scale!.value = l.use!.scale;
+        u.u_flipG!.value = c === 'normal' && this.vUp ? 1 : 0;
+      }
+      pass();
+    }
+    for (const e of [...fx].reverse()) {
+      u.u_blend!.value = Math.max(0, BLEND_MODES.findIndex((m) => m.value === e.blend));
+      u.u_opacity!.value = e.opacity;
+      u.u_flipG!.value = 0;
+      u.u_invert!.value = 0;
+      u.u_tex!.value = null;
+      const normal = c === 'normal';
+      if (e.kind === 'paint') {
+        const t = this.painted(e.id, c, ctx.active);
+        if (!t) continue;
+        u.u_src!.value = 1;
+        u.u_tex!.value = t.texture;
+      } else if (e.kind === 'fill') {
+        if (normal || !e.flat) continue;
+        u.u_src!.value = 0;
+        (u.u_value!.value as THREE.Vector3).set(...flatValue(e.flat, c));
+      } else if (e.kind === 'generator' && e.generator) {
+        const g = e.generator;
+        const s = GENERATOR_SOURCES.find((x) => x.value === g.source)!;
+        const t = this.baked.get(s.map);
+        if (normal || !t) continue;
+        u.u_src!.value = 3;
+        u.u_tex!.value = t.texture;
+        u.u_ch!.value = s.map === 'position' || s.map === 'worldNormal' ? 1 : 0;
+        u.u_level!.value = g.level;
+        u.u_spread!.value = g.spread;
+        u.u_invert!.value = (g.invert ? 1 : 0) ^ (g.source === 'occlusion' ? 1 : 0);
+      } else if (e.kind === 'image' && e.image) {
+        const t = ctx.image(e.image.file);
+        if (normal || !t) continue;
+        u.u_src!.value = 4;
+        u.u_tex!.value = t;
+        u.u_scale!.value = e.image.scale;
+        u.u_invert!.value = e.image.invert ? 1 : 0;
+      } else if (e.kind === 'levels' && e.levels) {
+        if (normal) continue;
+        u.u_src!.value = 10;
+        (u.u_levels!.value as THREE.Vector3).set(e.levels.low, e.levels.high, e.levels.gamma);
+      } else if (e.kind === 'invert') {
+        if (normal) continue;
+        u.u_src!.value = 11;
+      } else if (e.kind === 'hsl' && e.hsl) {
+        if (normal) continue;
+        u.u_src!.value = 12;
+        (u.u_hsl!.value as THREE.Vector3).set(e.hsl.hue, e.hsl.saturation, e.hsl.lightness);
+      } else if (e.kind === 'blur') {
+        u.u_src!.value = 13;
+        u.u_radius!.value = e.radius ?? 0.005;
+      } else continue;
+      pass();
+    }
+    return a;
+  }
+
   dispose(): void {
     for (const id of [...this.pixels.keys()]) this.dropLayer(id);
     for (const t of [...this.display.values(), ...this.live.values()]) t.dispose();
@@ -493,41 +693,40 @@ export class SetGPU {
     this.stroke?.dispose();
     for (const t of [...this.baked.values(), ...this.islandsBySize.values(), ...this.maskRts.values()]) t.dispose();
     this.maskWork?.forEach((t) => t.dispose());
+    this.fxWork?.forEach((t) => t.dispose());
+    for (const w of this.levels) w?.forEach((t) => t.dispose());
     for (const m of this.fills.values()) for (const t of m.values()) t.dispose();
   }
 }
 
 const CAM = new THREE.Camera();
 
-function flatten(layers: Layer[], opacity = 1): { layer: Layer; opacity: number }[] {
-  const out: { layer: Layer; opacity: number }[] = [];
-  for (const l of layers) {
-    if (!l.visible) continue;
-    if (l.kind === 'group') out.push(...flatten(l.children, opacity * l.opacity));
-    else out.push({ layer: l, opacity: opacity * l.opacity });
-  }
-  return out;
+interface Ctx {
+  masks: Map<string, THREE.WebGLRenderTarget>;
+  active: { layer: string; keys: Key[] } | null;
+  fillTextures: (l: FillLayer) => { tex: RoleTextures; surface: Record<string, unknown> } | null;
+  image: (file: string) => THREE.Texture | null;
 }
 
-function flatValue(l: FillLayer, c: Channel, surface?: Record<string, unknown>): [number, number, number] {
+function flatValue(flat: FlatValues, c: Channel, surface?: Record<string, unknown>): [number, number, number] {
   const s = surface as { color?: string; roughness?: number; metalness?: number } | undefined;
   switch (c) {
     case 'color':
-      return hexRgb(s?.color ?? l.flat.color);
+      return hexRgb(s?.color ?? flat.color);
     case 'glow':
-      return hexRgb(l.flat.glow);
+      return hexRgb(flat.glow);
     case 'roughness': {
-      const v = s?.roughness ?? l.flat.roughness;
+      const v = s?.roughness ?? flat.roughness;
       return [v, v, v];
     }
     case 'metalness': {
-      const v = s?.metalness ?? l.flat.metalness;
+      const v = s?.metalness ?? flat.metalness;
       return [v, v, v];
     }
     case 'normal':
       return [0.5, 0.5, 1];
     default: {
-      const v = l.flat[c];
+      const v = flat[c];
       return [v, v, v];
     }
   }

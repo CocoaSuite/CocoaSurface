@@ -3,6 +3,7 @@ import { Button, IconButton } from '@cocoasurface/ui';
 import { CHANNELS, MESH_MAPS } from '@cocoasurface/project';
 import { Viewport, type CameraView } from '../engine/viewport';
 import { setView } from '../io';
+import { engine } from '../engine/engine';
 import { currentSet, set, useApp, type ViewMode } from '../store';
 
 let current: Viewport | null = null;
@@ -22,6 +23,8 @@ export function ViewportPane() {
   const busy = useApp((s) => s.busy);
   const warnings = useApp((s) => s.warnings);
   const job = useApp((s) => s.job);
+  const stencil = useApp((s) => s.stencil);
+  const stencilUrl = stencil?.on ? engine.toolImages.get(stencil.name)?.url : undefined;
   useApp((s) => s.project);
   const baked = currentSet()?.bake?.done ?? [];
 
@@ -44,6 +47,9 @@ export function ViewportPane() {
 
   return (
     <div className="cs-view" ref={ref}>
+      {stencil && stencilUrl && (
+        <img className="cs-stencil" src={stencilUrl} alt="" style={{ left: `${stencil.x * 100}%`, top: `${stencil.y * 100}%`, width: `${stencil.scale * 100}%`, transform: `translate(-50%, -50%) rotate(${-stencil.angle}deg)` }} />
+      )}
       <div className="cs-axes">
         {VIEWS.map((x) => (
           <Button key={x.v} size="sm" onClick={() => current?.look(x.v)}>

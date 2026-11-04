@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { duplicateLayer, findLayer, insertLayer, moveLayer, newFillLayer, newGroup, newPaintLayer, newProject, newTextureSet, pixelPath, placeOf, readProject, removeLayer, writeProject } from '../src';
+import { duplicateLayer, findLayer, newLayerEffect, pixelOwners, insertLayer, moveLayer, newFillLayer, newGroup, newPaintLayer, newProject, newTextureSet, pixelPath, placeOf, readProject, removeLayer, writeProject } from '../src';
 
 describe('layer stacks', () => {
   const a = newPaintLayer('A', ['color']);
@@ -94,5 +94,23 @@ describe('older projects', () => {
     expect(m.base).toBe(1);
     expect(m.items.map((i) => i.kind)).toEqual(['generator', 'paint']);
     expect(r.value.files.get(pixelPath(`${l.id}-m`, 'grey'))).toEqual(new Uint8Array([7]));
+  });
+});
+
+describe('layer effects', () => {
+  it('give their strokes new ids when duplicated, keep them when saved, and refuse broken ones', async () => {
+    const l = newFillLayer('F', ['color', 'roughness']);
+    l.effects = [newLayerEffect('paint'), newLayerEffect('fill'), newLayerEffect('levels')];
+    expect(l.effects[1]!.flat?.roughness).toBeTypeOf('number');
+    const { layer, ids } = duplicateLayer(l);
+    expect(pixelOwners(layer)).toHaveLength(4);
+    expect(ids.get(l.effects[0]!.id)).toBe(layer.effects![0]!.id);
+    expect(layer.effects![0]!.id).not.toBe(l.effects[0]!.id);
+    const p = newProject('P');
+    p.textureSets.push({ ...newTextureSet('S', ['M']), layers: [l] });
+    const r = await readProject(await writeProject({ project: p, files: new Map() }));
+    expect(r.ok && r.value.project.textureSets[0]!.layers[0]!.effects?.map((e) => e.kind)).toEqual(['paint', 'fill', 'levels']);
+    (l as unknown as { effects: unknown }).effects = 'x';
+    expect((await readProject(await writeProject({ project: p, files: new Map() }))).ok).toBe(false);
   });
 });

@@ -88,6 +88,7 @@ export async function loadModel(name: string, bytes: Uint8Array, fit?: LoadedMod
     if (!g.getAttribute('uv')) warnings.push(`“${src.name || 'A mesh'}” has no texture coordinates (UVs) and can't be painted.`);
     if (!g.groups.length) g.addGroup(0, g.index ? g.index.count : g.getAttribute('position').count, 0);
     triangles += (g.index ? g.index.count : g.getAttribute('position').count) / 3;
+    markIslands(g);
     const mesh = new THREE.Mesh(g, []);
     mesh.name = src.name;
     parts.push({ mesh, slots: meshSlots });
@@ -105,4 +106,49 @@ export async function loadModel(name: string, bytes: Uint8Array, fit?: LoadedMod
     p.mesh.geometry.computeBoundingBox();
   }
   return { name, root, parts, slots, vUp: ext !== 'glb' && ext !== 'gltf', warnings, triangles, fit: { centre, scale: s } };
+}
+
+/** Number each UV island (triangles joined through shared texture coordinates) in an `a_island` attribute. */
+function markIslands(g: THREE.BufferGeometry): void {
+  const uv = g.getAttribute('uv');
+  const n = g.getAttribute('position').count;
+  const id = new Float32Array(n);
+  if (uv) {
+    const up = new Int32Array(n).map((_, i) => i);
+    const find = (i: number): number => {
+      while (up[i] !== i) i = up[i] = up[up[i]!]!;
+      return i;
+    };
+    const join = (a: number, b: number) => {
+      const x = find(a), y = find(b);
+      if (x !== y) up[x] = y;
+    };
+    const seen = new Map<string, number>();
+    for (let i = 0; i < n; i++) {
+      const k = `${Math.round(uv.getX(i) * 1e5)},${Math.round(uv.getY(i) * 1e5)}`;
+      const j = seen.get(k);
+      if (j === undefined) seen.set(k, i);
+      else join(i, j);
+    }
+    const idx = g.index;
+    const tris = (idx ? idx.count : n) / 3;
+    for (let t = 0; t < tris; t++) {
+      const a = idx ? idx.getX(t * 3) : t * 3;
+      join(a, idx ? idx.getX(t * 3 + 1) : t * 3 + 1);
+      join(a, idx ? idx.getX(t * 3 + 2) : t * 3 + 2);
+    }
+    const num = new Map<number, number>();
+    for (let i = 0; i < n; i++) {
+      const r = find(i);
+      if (!num.has(r)) num.set(r, num.size);
+      id[i] = num.get(r)!;
+    }
+  }
+  g.setAttribute('a_island', new THREE.BufferAttribute(id, 1));
+}
+
+/** The UV island a ray hit. */
+export function islandAt(g: THREE.BufferGeometry, face: number): number {
+  const a = g.index ? g.index.getX(face * 3) : face * 3;
+  return (g.getAttribute('a_island') as THREE.BufferAttribute).getX(a);
 }

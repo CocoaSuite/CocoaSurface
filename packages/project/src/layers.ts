@@ -1,4 +1,4 @@
-import { uid, type Layer } from './model';
+import { uid, type Effect, type Layer } from './model';
 
 export interface Place {
   /** Group id, or null for the top of the stack. */
@@ -78,7 +78,13 @@ export function moveLayer(layers: Layer[], id: string, to: Place): Layer[] {
 export function duplicateLayer(l: Layer, ids = new Map<string, string>()): { layer: Layer; ids: Map<string, string> } {
   const id = uid();
   ids.set(l.id, id);
-  const mask = l.mask && { ...l.mask, items: l.mask.items.map((m) => { const n = uid(); ids.set(m.id, n); return { ...structuredClone(m), id: n }; }) };
+  const copy = (m: Effect) => { const n = uid(); ids.set(m.id, n); return { ...structuredClone(m), id: n }; };
+  const mask = l.mask && { ...l.mask, items: l.mask.items.map(copy) };
   if (l.kind === 'group') return { layer: { ...l, id, mask, children: l.children.map((c) => duplicateLayer(c, ids).layer) }, ids };
-  return { layer: { ...structuredClone(l), id, mask }, ids };
+  return { layer: { ...structuredClone(l), id, mask, ...(l.effects ? { effects: l.effects.map(copy) } : {}) }, ids };
+}
+
+/** Ids that own painted pixels: the layer, its mask's and its own effects. */
+export function pixelOwners(l: Layer): string[] {
+  return [l.id, ...(l.mask?.items.map((m) => m.id) ?? []), ...(l.effects?.map((e) => e.id) ?? [])];
 }

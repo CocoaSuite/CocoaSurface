@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { allLayers, type Channel, type FillLayer, type MeshMap, type Project, type TextureSet } from '@cocoasurface/project';
+import { allLayers, pixelOwners, type Channel, type FillLayer, type MeshMap, type Project, type TextureSet } from '@cocoasurface/project';
 import { get, useApp } from '../store';
 import { BAKE_LAYER, Passes, SetGPU, type Key } from './gpu';
 import { evaluateMaps, toTextures, type RoleTextures } from './library';
@@ -48,6 +48,24 @@ class Engine {
     tex.needsUpdate = true;
     this.images.set(file, { bytes, tex });
     for (const id of this.sets.keys()) this.request(id);
+  }
+
+  /** Brush tips and stencils, kept for the session. */
+  readonly toolImages = new Map<string, { tex: THREE.Texture; aspect: number; url: string }>();
+
+  async addToolImage(name: string, bytes: Uint8Array): Promise<number> {
+    const bmp = await createImageBitmap(new Blob([bytes as BlobPart]), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+    const tex = new THREE.Texture(bmp);
+    tex.flipY = false;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.colorSpace = THREE.NoColorSpace;
+    tex.needsUpdate = true;
+    const old = this.toolImages.get(name);
+    old?.tex.dispose();
+    if (old) URL.revokeObjectURL(old.url);
+    const aspect = bmp.height / bmp.width;
+    this.toolImages.set(name, { tex, aspect, url: URL.createObjectURL(new Blob([bytes as BlobPart])) });
+    return aspect;
   }
 
   clearImages(): void {
@@ -226,7 +244,7 @@ class Engine {
   }
 
   layerIds(): string[] {
-    return (get().project?.textureSets ?? []).flatMap((t) => allLayers(t.layers).flatMap((l) => [l.id, ...(l.mask?.items.map((m) => m.id) ?? [])]));
+    return (get().project?.textureSets ?? []).flatMap((t) => allLayers(t.layers).flatMap(pixelOwners));
   }
 }
 

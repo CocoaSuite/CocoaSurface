@@ -12,9 +12,12 @@ import { Start } from './Start';
 import { TextureSets } from './TextureSets';
 import { ViewportPane } from './ViewportPane';
 
-const TOOLS: { id: Tool; icon: 'brush' | 'eraser' | 'orbit'; label: string }[] = [
+const TOOLS: { id: Tool; icon: 'brush' | 'eraser' | 'fill' | 'smudge' | 'blur' | 'orbit'; label: string }[] = [
   { id: 'paint', icon: 'brush', label: 'Paint' },
   { id: 'erase', icon: 'eraser', label: 'Erase' },
+  { id: 'fill', icon: 'fill', label: 'Fill' },
+  { id: 'smudge', icon: 'smudge', label: 'Smudge' },
+  { id: 'blur', icon: 'blur', label: 'Blur' },
   { id: 'orbit', icon: 'orbit', label: 'Orbit' },
 ];
 

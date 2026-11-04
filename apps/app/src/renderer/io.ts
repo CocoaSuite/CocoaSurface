@@ -1,6 +1,6 @@
 import { encodePng, evaluable, writeCocoaMat, type OutputRole } from '@cocoasurface/materials';
 import {
-  allLayers, bakedPath, channelInfo, MESH_MAPS, newProject, newTextureSet, pixelPath, PROJECT_EXT, readProject, setMaterial, uid, writeProject, writeSetMaterial,
+  allLayers, pixelOwners, bakedPath, channelInfo, MESH_MAPS, newProject, newTextureSet, pixelPath, PROJECT_EXT, readProject, setMaterial, uid, writeProject, writeSetMaterial,
   type Channel, type FillLayer, type Project, type TextureSet,
 } from '@cocoasurface/project';
 import { engine } from './engine/engine';
@@ -101,7 +101,7 @@ async function load(bytes: Uint8Array, path: string | null): Promise<void> {
   engine.clearImages();
   for (const t of project.textureSets)
     for (const l of allLayers(t.layers))
-      for (const m of l.mask?.items ?? [])
+      for (const m of [...(l.mask?.items ?? []), ...(l.effects ?? [])])
         if (m.image && files.has(m.image.file)) await engine.addImage(m.image.file, files.get(m.image.file)!);
   start(project, path, materials, warnings);
   await engine.ready();
@@ -110,7 +110,11 @@ async function load(bytes: Uint8Array, path: string | null): Promise<void> {
     if (!g) continue;
     g.ensure();
     for (const l of allLayers(t.layers))
-      for (const [id, key] of [...l.channels.map((c) => [l.id, c] as const), ...(l.mask?.items ?? []).filter((m) => m.kind === 'paint').map((m) => [m.id, 'grey'] as const)]) {
+      for (const [id, key] of [
+        ...l.channels.map((c) => [l.id, c] as const),
+        ...(l.mask?.items ?? []).filter((m) => m.kind === 'paint').map((m) => [m.id, 'grey'] as const),
+        ...(l.effects ?? []).filter((e) => e.kind === 'paint').flatMap((e) => l.channels.map((c) => [e.id, c] as const)),
+      ]) {
         const b = files.get(pixelPath(id, key));
         if (!b) continue;
         g.p.write(g.target(id, key)!, await decodePng(b));
@@ -342,7 +346,7 @@ export async function exportSetMaterial(t: TextureSet): Promise<void> {
     }
     const extra = new Map<string, Uint8Array>();
     const g = engine.sets.get(t.id)!;
-    const ids = new Set(allLayers(t.layers).map((l) => l.id));
+    const ids = new Set(allLayers(t.layers).flatMap(pixelOwners));
     for (const [layer, keys] of g.pixels) if (ids.has(layer)) for (const [key, target] of keys) extra.set(pixelPath(layer, key), await encodePng(target.width, target.height, 4, g.p.read(target)));
     const s = get();
     for (const l of allLayers(t.layers)) if (l.kind === 'fill' && l.use && s.materials[l.use.material]) extra.set(`materials/${l.use.material}.cocoamat`, s.materials[l.use.material]!.bytes);

@@ -20,6 +20,7 @@
 .cs-view { position: relative; min-width: 0; min-height: 0; background: #1b1b1b; overflow: hidden; }
 .cs-gl { display: block; width: 100%; height: 100%; touch-action: none; }
 .cs-cursor { position: absolute; left: 0; top: 0; display: none; pointer-events: none; border: 1px solid rgba(255, 255, 255, 0.8); border-radius: 50%; margin: 0; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); translate: -50% -50%; }
+.cs-stencil { position: absolute; pointer-events: none; opacity: 0.35; z-index: 1; }
 .cs-overlay { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; align-items: center; }
 .cs-overlay .cs-select { width: auto; background: var(--panel); }
 .cs-overlay .cs-btn:not([aria-pressed]) { background: var(--panel); }

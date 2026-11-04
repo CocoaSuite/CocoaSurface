@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { findLayer, type Channel, type Layer, type BakeSettings, type MeshMap, type Project, type TextureSet } from '@cocoasurface/project';
 import type { LoadedMaterial } from './engine/library';
 
-export type Tool = 'paint' | 'erase' | 'orbit';
+export type Tool = 'paint' | 'erase' | 'fill' | 'smudge' | 'blur' | 'orbit';
 export type ViewMode = 'material' | Channel | `mesh:${MeshMap}` | 'bake:skew' | 'bake:offset';
 
 export interface Brush {
@@ -18,6 +18,32 @@ export interface Brush {
   glow: string;
   /** What a brush paints into a mask: 1 white (shows), 0 black (hides). */
   maskValue: number;
+  shape: 'round' | 'square' | 'image';
+  /** Degrees. */
+  angle: number;
+  /** Picture used as the tip when the shape is 'image' (kept for the session, not in the project). */
+  alpha: string | null;
+  /** What pen pressure changes. */
+  pressure: 'none' | 'size' | 'flow' | 'both';
+  /** Lazy-mouse distance in screen pixels; 0 is off. */
+  stabilize: number;
+  /** The fill tool fills a UV island or the whole mesh. */
+  fillBy: 'island' | 'mesh';
+}
+
+/** A picture the brush paints through, placed on the screen. */
+export interface Stencil {
+  name: string;
+  /** Height over width of the picture. */
+  aspect: number;
+  /** Centre, as a share of the viewport. */
+  x: number;
+  y: number;
+  /** Width as a share of the viewport's width. */
+  scale: number;
+  /** Degrees. */
+  angle: number;
+  on: boolean;
 }
 
 export interface View {
@@ -39,6 +65,9 @@ interface State {
   layerId: string | null;
   /** The mask item being edited, if the mask rather than the layer is selected. */
   maskItem: string | null;
+  /** The layer effect being edited. */
+  effect: string | null;
+  stencil: Stencil | null;
   tool: Tool;
   brush: Brush;
   symmetry: boolean;
@@ -64,8 +93,10 @@ export const useApp = create<State>(() => ({
   setId: null,
   layerId: null,
   maskItem: null,
+  effect: null,
+  stencil: null,
   tool: 'paint',
-  brush: { size: 60, flow: 0.8, opacity: 1, hardness: 0.6, spacing: 0.15, color: '#c8b49a', roughness: 0.5, metalness: 0, height: 0.6, glow: '#000000', maskValue: 1 },
+  brush: { size: 60, flow: 0.8, opacity: 1, hardness: 0.6, spacing: 0.15, color: '#c8b49a', roughness: 0.5, metalness: 0, height: 0.6, glow: '#000000', maskValue: 1, shape: 'round', angle: 0, alpha: null, pressure: 'size', stabilize: 0, fillBy: 'island' },
   symmetry: false,
   bakePaint: null,
   bakeValue: 1,
@@ -81,6 +112,10 @@ export const useApp = create<State>(() => ({
 
 export const get = () => useApp.getState();
 export const set = useApp.setState;
+
+useApp.subscribe((s, p) => {
+  if (s.effect && s !== p && (s.maskItem || !currentLayer(s)?.effects?.some((e) => e.id === s.effect))) set({ effect: null });
+});
 
 export function toast(text: string): void {
   set((s) => ({ toast: { text, n: (s.toast?.n ?? 0) + 1 } }));

@@ -5,7 +5,8 @@ import { findLayer, type Channel } from '@cocoasurface/project';
 import { currentLayer, currentSet, get, push, toast, useApp } from '../store';
 import { engine } from './engine';
 import { cageGeometry, settingsOf } from '../baking';
-import { BAKE_LAYER, hexRgb, type Key, type StrokeOptions } from './gpu';
+import { BAKE_LAYER, hexRgb, type Key, type StrokeOptions, type Tip } from './gpu';
+import { islandAt } from './model';
 
 export type CameraView = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
 
@@ -26,9 +27,11 @@ export class Viewport {
   private raf = 0;
   private ro: ResizeObserver;
   private cursor: HTMLDivElement;
-  private stroke: { set: string; opts: StrokeOptions; last: THREE.Vector2; carry: number } | null = null;
+  private stroke: { set: string; opts: StrokeOptions; last: THREE.Vector2; lazy: THREE.Vector2; carry: number; pressure: number; uv: THREE.Vector2 | null } | null = null;
   private ray = new THREE.Raycaster();
-  private queued: THREE.Vector3[] = [];
+  private queued: THREE.Vector4[] = [];
+  private stencilDrag: { x: number; y: number; sx: number; sy: number } | null = null;
+  private sDown = false;
   private unsub: () => void;
 
   constructor(readonly host: HTMLElement) {
@@ -236,81 +239,118 @@ export class Viewport {
     const t = currentSet(s);
     const l = currentLayer(s);
     if (!engine.model || !t) return 'Open a model to paint on.';
+    const erase = s.tool === 'erase';
     if (s.bakePaint) {
-      const v = s.tool === 'erase' ? (s.bakePaint === 'skew' ? 0 : 0.5) : s.bakeValue;
+      const v = erase ? (s.bakePaint === 'skew' ? 0 : 0.5) : s.bakeValue;
       return { set: t.id, opts: { key: s.bakePaint, layer: BAKE_LAYER, values: new Map([[s.bakePaint, [v, v, v, 1]]]), opacity: s.brush.opacity, erase: false } };
     }
     if (!l) return 'Pick a layer to paint on.';
     if (l.locked) return 'The layer is locked.';
     if (!l.visible) return 'The layer is hidden.';
-    const erase = s.tool === 'erase';
     const b = s.brush;
-    const values = new Map<Key, [number, number, number, number]>();
-    let key: Key;
     const item = s.maskItem ? l.mask?.items.find((x) => x.id === s.maskItem) : undefined;
     if (s.maskItem && item) {
-      if (item.kind !== 'paint') return 'Pick a Paint item in the mask to draw on it.';
+      if (item.kind !== 'paint') return 'Pick a Paint effect in the mask to draw on it.';
       const v = b.maskValue;
       return { set: t.id, opts: { key: 'grey', layer: item.id, values: new Map([['grey', [v, v, v, 1]]]), opacity: b.opacity, erase } };
-    } else if (l.kind === 'paint') {
-      key = 'color';
-      for (const c of l.channels) {
-        if (!t.channels.includes(c) || c === 'normal') continue;
-        const v: Record<string, [number, number, number]> = {
-          color: hexRgb(b.color),
-          glow: hexRgb(b.glow),
-          roughness: [b.roughness, b.roughness, b.roughness],
-          metalness: [b.metalness, b.metalness, b.metalness],
-          height: [b.height, b.height, b.height],
-          occlusion: [1, 1, 1],
-          opacity: [1, 1, 1],
-        };
-        values.set(c, [...v[c]!, 1]);
-      }
-      if (!values.size) return 'The layer paints none of the texture set’s channels.';
-    } else return l.kind === 'fill' ? 'Fill layers show through their mask. Add a black mask and a Paint item to draw where it shows.' : 'Groups can’t be painted.';
-    return { set: t.id, opts: { key, layer: l.id, values, opacity: b.opacity, erase } };
+    }
+    const fx = s.effect ? l.effects?.find((x) => x.id === s.effect) : undefined;
+    if (fx && fx.kind !== 'paint') return 'Pick a Paint effect to draw on it.';
+    if (!fx && l.kind !== 'paint') return l.kind === 'fill' ? 'Add a Paint effect or a mask to draw on a fill layer.' : 'Groups can’t be painted.';
+    const values = new Map<Key, [number, number, number, number]>();
+    for (const c of l.channels) {
+      if (!t.channels.includes(c) || c === 'normal') continue;
+      const v: Record<string, [number, number, number]> = {
+        color: hexRgb(b.color),
+        glow: hexRgb(b.glow),
+        roughness: [b.roughness, b.roughness, b.roughness],
+        metalness: [b.metalness, b.metalness, b.metalness],
+        height: [b.height, b.height, b.height],
+        occlusion: [1, 1, 1],
+        opacity: [1, 1, 1],
+      };
+      values.set(c, [...v[c]!, 1]);
+    }
+    if (!values.size) return 'The layer paints none of the texture set’s channels.';
+    return { set: t.id, opts: { key: 'color', layer: fx?.id ?? l.id, values, opacity: b.opacity, erase } };
   }
 
-  private dabsAlong(from: THREE.Vector2, to: THREE.Vector2, carry: number): { dabs: THREE.Vector3[]; carry: number } {
+  private tip(): Tip {
+    const s = get(), b = s.brush;
+    const el = this.r.domElement;
+    const st = s.stencil?.on ? s.stencil : null;
+    const sImg = st && engine.toolImages.get(st.name);
+    return {
+      hardness: b.hardness,
+      flow: b.flow,
+      shape: b.shape === 'square' ? 1 : b.shape === 'image' ? 2 : 0,
+      angle: THREE.MathUtils.degToRad(b.angle),
+      alpha: (b.shape === 'image' && b.alpha && engine.toolImages.get(b.alpha)?.tex) || null,
+      stencil: st && sImg ? { tex: sImg.tex, at: new THREE.Vector4(st.x * el.width, (1 - st.y) * el.height, st.scale * el.width, THREE.MathUtils.degToRad(st.angle)), aspect: sImg.aspect } : null,
+    };
+  }
+
+  private dabsAlong(from: THREE.Vector2, to: THREE.Vector2, carry: number, p0: number, p1: number): { dabs: THREE.Vector4[]; carry: number } {
     const b = get().brush;
     const k = this.r.getPixelRatio();
     const radius = (b.size / 2) * k;
-    const step = Math.max(1, radius * 2 * b.spacing);
+    const bySize = b.pressure === 'size' || b.pressure === 'both', byFlow = b.pressure === 'flow' || b.pressure === 'both';
+    const step = Math.max(1, radius * 2 * b.spacing * (bySize ? Math.max(0.1, Math.min(p0, p1)) : 1));
     const len = from.distanceTo(to);
-    const out: THREE.Vector3[] = [];
+    const out: THREE.Vector4[] = [];
     let d = carry;
     while (d <= len) {
-      const p = from.clone().lerp(to, len ? d / len : 0);
-      out.push(new THREE.Vector3(p.x, p.y, radius));
+      const f = len ? d / len : 0;
+      const p = from.clone().lerp(to, f);
+      const pr = p0 + (p1 - p0) * f;
+      out.push(new THREE.Vector4(p.x, p.y, radius * (bySize ? Math.max(0.05, pr) : 1), byFlow ? pr : 1));
       d += step;
     }
     if (get().symmetry) for (const m of out.map((p) => this.mirror(p))) if (m) out.push(m);
     return { dabs: out, carry: d - len };
   }
 
-  /** The dab on the other side of the model (mirrored across X), if it can be seen. */
-  private mirror(p: THREE.Vector3): THREE.Vector3 | null {
+  private hit(x: number, y: number): THREE.Intersection | null {
     const m = engine.model;
     if (!m) return null;
     const w = this.r.domElement.width, h = this.r.domElement.height;
-    this.ray.setFromCamera(new THREE.Vector2((p.x / w) * 2 - 1, (p.y / h) * 2 - 1), this.camera);
-    const hit = this.ray.intersectObjects(m.parts.map((x) => x.mesh), false)[0];
+    this.ray.setFromCamera(new THREE.Vector2((x / w) * 2 - 1, (y / h) * 2 - 1), this.camera);
+    return this.ray.intersectObjects(m.parts.map((p) => p.mesh), false)[0] ?? null;
+  }
+
+  /** The dab on the other side of the model (mirrored across X), if it can be seen. */
+  private mirror(p: THREE.Vector4): THREE.Vector4 | null {
+    const hit = this.hit(p.x, p.y);
     if (!hit) return null;
+    const w = this.r.domElement.width, h = this.r.domElement.height;
     const q = hit.point.clone();
     q.x = -q.x;
     q.project(this.camera);
     if (Math.abs(q.x) > 1 || Math.abs(q.y) > 1) return null;
-    return new THREE.Vector3((q.x * 0.5 + 0.5) * w, (q.y * 0.5 + 0.5) * h, p.z);
+    return new THREE.Vector4((q.x * 0.5 + 0.5) * w, (q.y * 0.5 + 0.5) * h, p.z, p.w);
   }
 
   private bindInput(): void {
     const el = this.r.domElement;
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     el.addEventListener('pointerleave', () => (this.cursor.style.display = 'none'));
-    window.addEventListener('keydown', (e) => e.key === 'Alt' && this.navButtons(true));
-    window.addEventListener('keyup', (e) => e.key === 'Alt' && this.navButtons(false));
-    window.addEventListener('blur', () => this.navButtons(false));
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Alt') this.navButtons(true);
+      if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey && !(e.target as HTMLElement).closest?.('input, textarea, select')) this.sDown = true;
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.key === 'Alt') this.navButtons(false);
+      if (e.code === 'KeyS') this.sDown = false;
+    });
+    window.addEventListener('blur', () => (this.navButtons(false), (this.sDown = false)));
+    // S and drag moves the stencil, S and the wheel scales it.
+    el.addEventListener('wheel', (e) => {
+      const st = get().stencil;
+      if (!this.sDown || !st) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      useApp.setState({ stencil: { ...st, scale: Math.max(0.02, Math.min(10, st.scale * (e.deltaY < 0 ? 1.08 : 1 / 1.08))) } });
+    }, { capture: true, passive: false });
     // Shift and right-drag turns the light around the model.
     el.addEventListener('pointerdown', (e) => {
       if (e.button !== 2 || !e.shiftKey) return;
@@ -334,50 +374,95 @@ export class Viewport {
     el.addEventListener('pointercancel', endLight);
     el.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 || e.altKey || get().tool === 'orbit') return;
+      const st = get().stencil;
+      if (this.sDown && st) {
+        el.setPointerCapture(e.pointerId);
+        this.stencilDrag = { x: e.clientX, y: e.clientY, sx: st.x, sy: st.y };
+        return;
+      }
       const t = this.strokeTarget();
       if (typeof t === 'string') return toast(t);
-      el.setPointerCapture(e.pointerId);
       const g = engine.sets.get(t.set)!;
       g.ensure();
+      if (get().tool === 'fill') return this.fillAt(e, t);
+      el.setPointerCapture(e.pointerId);
       engine.p!.measure(this.camera, el.width, el.height);
       g.beginStroke();
       const at = this.screen(e);
-      this.stroke = { ...t, last: at, carry: 0 };
+      const pr = pressureOf(e);
+      this.stroke = { ...t, last: at, lazy: at.clone(), carry: 0, pressure: pr, uv: this.hit(at.x, at.y)?.uv?.clone() ?? null };
       engine.active = { set: t.set, layer: t.opts.layer, keys: [...t.opts.values.keys()] };
-      this.paintTo(at);
+      this.paintTo(at, pr, true);
     });
     el.addEventListener('pointermove', (e) => {
       const b = el.getBoundingClientRect();
+      const sd = this.stencilDrag, st = get().stencil;
+      if (sd && st) {
+        useApp.setState({ stencil: { ...st, x: sd.sx + (e.clientX - sd.x) / b.width, y: sd.sy + (e.clientY - sd.y) / b.height } });
+        return;
+      }
       this.cursor.style.transform = `translate(${e.clientX - b.left}px, ${e.clientY - b.top}px)`;
       this.cursor.style.display = get().tool === 'orbit' ? 'none' : 'block';
-      if (this.stroke) for (const ev of e.getCoalescedEvents?.() ?? [e]) this.paintTo(this.screen(ev));
+      if (this.stroke) for (const ev of e.getCoalescedEvents?.() ?? [e]) this.paintTo(this.screen(ev), pressureOf(ev));
     });
     const end = () => {
+      this.stencilDrag = null;
       const st = this.stroke;
       if (!st) return;
       this.flush();
       this.stroke = null;
-      const g = engine.sets.get(st.set)!;
-      const old = g.endStroke(st.opts);
-      engine.active = null;
-      requestFor(st.set, st.opts);
-      const keys = [...old.keys()];
-      const swapAll = () => {
-        for (const k of keys) old.set(k, g.swap(st.opts.layer, k, old.get(k)!)!);
-        engine.request(st.set);
-      };
-      const l = findLayer(currentSet()?.layers ?? [], st.opts.layer) ?? currentLayer();
-      push({ label: st.opts.layer === BAKE_LAYER ? `Paint ${st.opts.key}` : `${get().tool === 'erase' ? 'Erase' : 'Paint'} on ${l?.name ?? 'layer'}`, undo: swapAll, redo: swapAll, drop: () => old.forEach((t) => t.dispose()) });
+      this.finish(st);
     };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
   }
 
-  private paintTo(at: THREE.Vector2): void {
+  /** The stroke becomes part of its layer, as one undo step. */
+  private finish(st: { set: string; opts: StrokeOptions }): void {
+    const g = engine.sets.get(st.set)!;
+    const old = g.endStroke(st.opts);
+    engine.active = null;
+    requestFor(st.set, st.opts);
+    const keys = [...old.keys()];
+    const swapAll = () => {
+      for (const k of keys) old.set(k, g.swap(st.opts.layer, k, old.get(k)!)!);
+      engine.request(st.set);
+    };
+    const l = findLayer(currentSet()?.layers ?? [], st.opts.layer) ?? currentLayer();
+    const verb = { erase: 'Erase', fill: 'Fill', smudge: 'Smudge', blur: 'Blur' }[get().tool as string] ?? 'Paint';
+    push({ label: st.opts.layer === BAKE_LAYER ? `Paint ${st.opts.key}` : `${verb} on ${l?.name ?? 'layer'}`, undo: swapAll, redo: swapAll, drop: () => old.forEach((t) => t.dispose()) });
+  }
+
+  /** The fill tool: the UV island (or mesh) under the pointer, at once. */
+  private fillAt(e: PointerEvent, t: { set: string; opts: StrokeOptions }): void {
+    const at = this.screen(e);
+    const hit = this.hit(at.x, at.y);
+    const m = engine.model!;
+    const part = hit ? m.parts.findIndex((p) => p.mesh === hit.object) : -1;
+    if (!hit || part < 0 || hit.faceIndex == null) return toast('Click on the model to fill.');
+    const g = engine.sets.get(t.set)!;
+    if (!g.parts.includes(part)) return toast('That part belongs to another texture set.');
+    g.beginStroke();
+    g.fillPart(part, get().brush.fillBy === 'island' ? islandAt(m.parts[part]!.mesh.geometry, hit.faceIndex) : -1);
+    engine.active = { set: t.set, layer: t.opts.layer, keys: [...t.opts.values.keys()] };
+    g.preview(t.opts);
+    this.finish(t);
+  }
+
+  private paintTo(at: THREE.Vector2, pr: number, first = false): void {
     const st = this.stroke!;
-    const { dabs, carry } = this.dabsAlong(st.last, at, st.carry);
-    st.last = at;
+    let to = at;
+    const lazy = get().brush.stabilize * this.r.getPixelRatio();
+    if (lazy > 0 && !first) {
+      const d = at.distanceTo(st.lazy);
+      if (d <= lazy) return;
+      to = st.lazy.clone().lerp(at, (d - lazy) / d);
+      st.lazy.copy(to);
+    }
+    const { dabs, carry } = this.dabsAlong(st.last, to, st.carry, st.pressure, pr);
+    st.last = to;
     st.carry = carry;
+    st.pressure = pr;
     this.queued.push(...dabs);
     this.redraw();
   }
@@ -387,14 +472,27 @@ export class Viewport {
     const st = this.stroke;
     if (!st || !this.queued.length) return;
     const g = engine.sets.get(st.set)!;
-    const b = get().brush;
     const el = this.r.domElement;
-    g.dabs(this.camera, new THREE.Vector2(el.width, el.height), this.queued, b.hardness, b.flow);
+    g.dabs(this.camera, new THREE.Vector2(el.width, el.height), this.queued, this.tip());
     this.queued = [];
-    g.preview(st.opts);
+    const tool = get().tool;
+    if (tool === 'smudge' || tool === 'blur') {
+      const offset = new THREE.Vector2();
+      if (tool === 'smudge') {
+        const uv = this.hit(st.last.x, st.last.y)?.uv?.clone() ?? null;
+        if (uv && st.uv) {
+          offset.subVectors(st.uv, uv);
+          if (offset.length() > 0.05) offset.set(0, 0);
+        }
+        st.uv = uv;
+      }
+      g.smearStroke(st.opts, tool === 'smudge' ? 1 : 0, 6 / g.size, offset);
+    } else g.preview(st.opts);
     requestFor(st.set, st.opts);
   }
 }
+
+const pressureOf = (e: PointerEvent) => (e.pointerType === 'pen' ? Math.max(0.01, e.pressure) : 1);
 
 /** Recomposite what a stroke changes: its channels, everything for a mask, nothing for bake maps. */
 function requestFor(set: string, o: StrokeOptions): void {
