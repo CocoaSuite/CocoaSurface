@@ -5,7 +5,9 @@ import type { Part } from './model';
 import type { RoleTextures } from './library';
 import { COMMIT_FS, COPY_FS, DAB_FS, DIST_FS, DIST_VS, FILL_FS, FINAL_FS, ISLAND_FS, LAYER_FS, MAX_DABS, QUAD_VS, UV_VS } from './shaders';
 
-export type Key = Channel | 'mask';
+export type Key = Channel | 'mask' | 'skew' | 'offset';
+/** Pixels painted for baking (skew and offset) live under this layer id. */
+export const BAKE_LAYER = '#bake';
 
 const shader = (fs: string, uniforms: Record<string, THREE.IUniform>, vs = QUAD_VS, extra: Partial<THREE.ShaderMaterialParameters> = {}) =>
   new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: vs, fragmentShader: fs, uniforms, depthTest: false, depthWrite: false, ...extra });
@@ -154,7 +156,7 @@ export class SetGPU {
   /** While a stroke is drawn: the layer's pixels with the stroke in them. */
   readonly live = new Map<Key, THREE.WebGLRenderTarget>();
   readonly scene = new THREE.Scene();
-  private proxies: { mesh: THREE.Mesh; inSet: boolean[] }[] = [];
+  private proxies: { mesh: THREE.Mesh; inSet: boolean[]; part: number }[] = [];
 
   constructor(
     readonly p: Passes,
@@ -165,12 +167,12 @@ export class SetGPU {
   setParts(parts: Part[]): void {
     this.scene.clear();
     this.proxies = [];
-    for (const part of parts) {
+    for (const [i, part] of parts.entries()) {
       const inSet = part.slots.map((s) => this.set.slots.includes(s));
       if (!inSet.some(Boolean)) continue;
       const mesh = new THREE.Mesh(part.mesh.geometry, []);
       mesh.frustumCulled = false;
-      this.proxies.push({ mesh, inSet });
+      this.proxies.push({ mesh, inSet, part: i });
       this.scene.add(mesh);
     }
     this.island?.dispose();
@@ -195,8 +197,13 @@ export class SetGPU {
     return t;
   }
 
-  drawWith(m: THREE.Material, target: THREE.WebGLRenderTarget): void {
-    this.draw(m, target);
+  /** Model parts this set paints. */
+  get parts(): number[] {
+    return this.proxies.map((x) => x.part);
+  }
+
+  drawWith(m: THREE.Material, target: THREE.WebGLRenderTarget, part?: number): void {
+    this.draw(m, target, part);
   }
 
   setBaked(m: import('@cocoasurface/project').MeshMap, fill: (t: THREE.WebGLRenderTarget) => void, size: number): void {
@@ -214,8 +221,8 @@ export class SetGPU {
     this.baked.delete(m);
   }
 
-  private draw(m: THREE.Material, target: THREE.WebGLRenderTarget): void {
-    for (const x of this.proxies) x.mesh.material = x.inSet.map((b) => (b ? m : this.p.hidden));
+  private draw(m: THREE.Material, target: THREE.WebGLRenderTarget, part?: number): void {
+    for (const x of this.proxies) x.mesh.material = x.inSet.map((b) => (b && (part === undefined || part === x.part) ? m : this.p.hidden));
     const r = this.p.r, prev = r.getRenderTarget(), auto = r.autoClear;
     r.autoClear = false;
     r.setRenderTarget(target);
@@ -265,7 +272,7 @@ export class SetGPU {
     let t = m.get(key);
     if (!t && create) {
       t = rt(this.size);
-      this.p.clear(t, key === 'mask' ? [1, 1, 1, 1] : [0, 0, 0, 0]);
+      this.p.clear(t, key === 'mask' ? [1, 1, 1, 1] : key === 'skew' ? [0, 0, 0, 1] : key === 'offset' ? [0.5, 0.5, 0.5, 1] : [0, 0, 0, 0]);
       m.set(key, t);
     }
     return t ?? null;
@@ -322,7 +329,7 @@ export class SetGPU {
       u.u_stroke!.value = this.stroke!.texture;
       (u.u_value!.value as THREE.Vector4).set(v[0] * v[3], v[1] * v[3], v[2] * v[3], v[3]);
       u.u_opacity!.value = o.opacity;
-      u.u_erase!.value = o.erase && key !== 'mask' ? 1 : 0;
+      u.u_erase!.value = o.erase && key !== 'mask' && key !== 'skew' && key !== 'offset' ? 1 : 0;
       this.p.run(this.p.commit, out);
     }
   }

@@ -4,7 +4,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { findLayer, type Channel } from '@cocoasurface/project';
 import { currentLayer, currentSet, get, push, toast, useApp } from '../store';
 import { engine } from './engine';
-import { hexRgb, type Key, type StrokeOptions } from './gpu';
+import { BAKE_LAYER, hexRgb, type Key, type StrokeOptions } from './gpu';
 
 export type CameraView = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
 
@@ -208,6 +208,10 @@ export class Viewport {
     const t = currentSet(s);
     const l = currentLayer(s);
     if (!engine.model || !t) return 'Open a model to paint on.';
+    if (s.bakePaint) {
+      const v = s.tool === 'erase' ? (s.bakePaint === 'skew' ? 0 : 0.5) : s.bakeValue;
+      return { set: t.id, opts: { key: s.bakePaint, layer: BAKE_LAYER, values: new Map([[s.bakePaint, [v, v, v, 1]]]), opacity: s.brush.opacity, erase: false } };
+    }
     if (!l) return 'Pick a layer to paint on.';
     if (l.locked) return 'The layer is locked.';
     if (!l.visible) return 'The layer is hidden.';
@@ -305,15 +309,14 @@ export class Viewport {
       const g = engine.sets.get(st.set)!;
       const old = g.endStroke(st.opts);
       engine.active = null;
-      engine.request(st.set, [...st.opts.values.keys()].filter((k): k is Channel => k !== 'mask'));
-      if (st.opts.key === 'mask') engine.request(st.set);
+      requestFor(st.set, st.opts);
       const keys = [...old.keys()];
       const swapAll = () => {
         for (const k of keys) old.set(k, g.swap(st.opts.layer, k, old.get(k)!)!);
         engine.request(st.set);
       };
       const l = findLayer(currentSet()?.layers ?? [], st.opts.layer);
-      push({ label: `${get().tool === 'erase' ? 'Erase' : 'Paint'} on ${l?.name ?? 'layer'}`, undo: swapAll, redo: swapAll, drop: () => old.forEach((t) => t.dispose()) });
+      push({ label: st.opts.layer === BAKE_LAYER ? `Paint ${st.opts.key}` : `${get().tool === 'erase' ? 'Erase' : 'Paint'} on ${l?.name ?? 'layer'}`, undo: swapAll, redo: swapAll, drop: () => old.forEach((t) => t.dispose()) });
     };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
@@ -338,6 +341,13 @@ export class Viewport {
     g.dabs(this.camera, new THREE.Vector2(el.width, el.height), this.queued, b.hardness, b.flow);
     this.queued = [];
     g.preview(st.opts);
-    engine.request(st.set, st.opts.key === 'mask' ? undefined : [...st.opts.values.keys()].filter((k): k is Channel => k !== 'mask'));
+    requestFor(st.set, st.opts);
   }
+}
+
+/** Recomposite what a stroke changes: its channels, everything for a mask, nothing for bake maps. */
+function requestFor(set: string, o: StrokeOptions): void {
+  if (o.key === 'skew' || o.key === 'offset') engine.request(set, []);
+  else if (o.key === 'mask') engine.request(set);
+  else engine.request(set, [...o.values.keys()].filter((k): k is Channel => k !== 'mask' && k !== 'skew' && k !== 'offset'));
 }

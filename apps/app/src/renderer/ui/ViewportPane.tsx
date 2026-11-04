@@ -71,6 +71,8 @@ export function ViewportPane() {
               ))}
             </optgroup>
           )}
+          <option value="bake:skew">Skew (bake)</option>
+          <option value="bake:offset">Offset (bake)</option>
         </select>
         <Button size="sm" aria-pressed={view.ortho} onClick={() => set((s) => ({ view: { ...s.view, ortho: !s.view.ortho } }))}>
           {view.ortho ? 'Orthographic' : 'Perspective'}

@@ -71,9 +71,27 @@ export interface BakeSettings {
   /** As a share of the model's size. */
   aoDistance: number;
   idFrom: 'mesh' | 'material';
+  /** Low and high meshes pair up by name (`body_low` with `body_high`); rays only reach a mesh's own pair. */
+  matchByName: boolean;
+  /** Work out each mesh's cage from how far its high-poly surface is. */
+  autoCage: boolean;
+  /** Cage per low-poly mesh (by name), as a share of the model's size. */
+  cages: Record<string, { front: number; rear: number }>;
+  /** Samples per texel side: 1, 2 or 4. */
+  antialias: 1 | 2 | 4;
 }
 
-export const BAKE_DEFAULTS: BakeSettings = { size: 2048, maps: ['normal', 'worldNormal', 'position', 'occlusion', 'curvature', 'thickness', 'id'], useHigh: false, front: 0.03, rear: 0.03, aoSamples: 64, aoDistance: 0.2, idFrom: 'material' };
+/** Rounds hard edges in the baked maps, as if they were bevelled, by blending normals of nearby surfaces. */
+export interface Bevel {
+  /** As a share of the model's size. */
+  radius: number;
+  samples: number;
+  edges: 'both' | 'convex' | 'concave';
+}
+
+export const BEVEL_DEFAULTS: Bevel = { radius: 0.01, samples: 16, edges: 'convex' };
+
+export const BAKE_DEFAULTS: BakeSettings = { size: 2048, maps: ['normal', 'worldNormal', 'position', 'occlusion', 'curvature', 'thickness', 'id'], useHigh: false, front: 0.03, rear: 0.03, aoSamples: 64, aoDistance: 0.2, idFrom: 'material', matchByName: true, autoCage: true, cages: {}, antialias: 1 };
 
 /** A mask made from a baked mesh map: edges, cavities, thin parts, height or up-facing surfaces. */
 export interface Generator {
@@ -176,6 +194,8 @@ export interface Project {
   model: { file: string; name: string } | null;
   /** The detailed model baked from, if any. */
   highPoly?: { file: string; name: string } | null;
+  /** The bevel shader on the model baked from (the high-poly one if used, else the model itself). */
+  bevel?: Bevel | null;
   textureSets: TextureSet[];
   library: LibraryMaterial[];
   export: ExportSettings;

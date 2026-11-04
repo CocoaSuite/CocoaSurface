@@ -1,6 +1,6 @@
 import { Field, PanelHeader, Section } from '@cocoasurface/ui';
 import { CHANNELS, MESH_MAPS, TEXTURE_SIZES, type TextureSize } from '@cocoasurface/project';
-import { Button } from '@cocoasurface/ui';
+import { Button, Segmented } from '@cocoasurface/ui';
 import { commit, currentSet, editSet, set, useApp } from '../store';
 import { Chips, Range } from './controls';
 
@@ -8,6 +8,8 @@ export function TextureSets({ onBake }: { onBake: () => void }) {
   const project = useApp((s) => s.project)!;
   const setId = useApp((s) => s.setId);
   const view = useApp((s) => s.view);
+  const bakePaint = useApp((s) => s.bakePaint);
+  const bakeValue = useApp((s) => s.bakeValue);
   const t = currentSet();
   return (
     <div className="cs-pane">
@@ -51,6 +53,30 @@ export function TextureSets({ onBake }: { onBake: () => void }) {
             </div>
           ) : (
             <span className="cs-note">Not baked. Baked maps give the normal and occlusion channels their base, and drive edge, cavity and height masks.</span>
+          )}
+          {(
+            <>
+              <span className="cs-note">Paint for baking</span>
+              <Segmented
+                label="Paint for baking"
+                options={[{ value: 'off', label: 'Off' }, { value: 'skew', label: 'Skew' }, { value: 'offset', label: 'Offset' }]}
+                value={bakePaint ?? 'off'}
+                onChange={(v) => set((s) => ({ bakePaint: v === 'off' ? null : v, bakeValue: v === 'offset' ? 0.75 : 1, view: { ...s.view, mode: v === 'off' ? 'material' : `bake:${v}` } }))}
+              />
+              {bakePaint && (
+                <>
+                  <Field label={bakePaint === 'skew' ? 'Skew' : 'Offset'}>
+                    <Range value={bakeValue} min={0} max={1} label="Painted value" onChange={(v) => set({ bakeValue: v })} onCommit={() => {}} />
+                  </Field>
+                  <span className="cs-note">
+                    {bakePaint === 'skew'
+                      ? 'White turns rays to the face normal where details come out skewed. Erase returns to the smooth normal.'
+                      : 'Grey is the cage as measured; lighter reaches further, darker less. Erase returns to grey.'}{' '}
+                    Bake again to see the effect.
+                  </span>
+                </>
+              )}
+            </>
           )}
           <Button size="sm" onClick={onBake} disabled={!!useApp.getState().job}>
             {t.bake?.done.length ? 'Bake again…' : 'Bake mesh maps…'}

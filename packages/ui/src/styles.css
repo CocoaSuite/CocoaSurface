@@ -21,6 +21,8 @@
   --cbg: #1f1f1f;
   --rowsel: #2d3a4d;
   --menuhover: #363636;
+  --on: #3d3d3d;
+  --off: #141414;
   --sans: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   /* CocoaSurface */
@@ -67,6 +69,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .cs-btn.ghost { background: none; border-color: transparent; color: var(--mute); }
 .cs-btn.ghost:hover { color: var(--fg); background: var(--panel2); }
 .cs-btn.sm { padding: 3px 9px; font-size: 12px; }
+.cs-btn[aria-pressed='true'] { background: var(--on); border-color: transparent; }
+.cs-btn[aria-pressed='false'] { background: var(--off); border-color: transparent; color: var(--mute); }
 :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--hl); outline-offset: 1px; }
 
 .cs-ic { display: inline-grid; place-items: center; padding: 5px 8px; }
@@ -160,10 +164,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .cs-lb:hover { color: var(--fg); }
 
 /* Segmented — CC (.seg) */
-.cs-seg { display: flex; gap: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
-.cs-seg button { background: none; border: 1px solid transparent; border-radius: 5px; padding: 3px 9px; color: var(--mute); font-size: 12px; cursor: pointer; }
+.cs-seg { display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
+.cs-seg button { background: none; border: 0; border-radius: 5px; padding: 3px 9px; color: var(--mute); font-size: 12px; cursor: pointer; }
 .cs-seg button:hover { color: var(--fg); }
-.cs-seg button.on { background: var(--panel2); border-color: var(--line); color: var(--fg); }
+.cs-seg button.on { background: var(--on); color: var(--fg); }
 
 /* Switch — CC (.sw2), brand yellow */
 .cs-sw { position: relative; width: 42px; height: 24px; flex: none; display: inline-block; }
@@ -178,7 +182,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .cs-tbar { display: flex; justify-content: center; align-items: center; gap: 4px; padding: 6px 10px; background: var(--panel); border-top: 1px solid var(--line); }
 .cs-tool { width: 34px; height: 30px; padding: 0; display: grid; place-items: center; background: none; border: 1px solid transparent; border-radius: 6px; cursor: pointer; }
 .cs-tool:hover { background: var(--panel2); }
-.cs-tool.on { background: var(--pri); color: var(--prifg); border-color: var(--pri); }
+.cs-tool.on { background: var(--on); color: var(--fg); border-color: transparent; }
 .cs-tool:disabled { opacity: 0.35; cursor: default; background: none; }
 
 /* Dialog — CC (.modal) */

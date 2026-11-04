@@ -4,7 +4,7 @@ import {
   type Channel, type FillLayer, type Project, type TextureSet,
 } from '@cocoasurface/project';
 import { engine } from './engine/engine';
-import { rt, type Key } from './engine/gpu';
+import { BAKE_LAYER, rt, type Key } from './engine/gpu';
 import { evaluateMaps, forgetMaterial, parseMaterial, type LoadedMaterial } from './engine/library';
 import { loadModel } from './engine/model';
 import { host, isDesktop, MATERIAL_FILTER, MODEL_FILTER, PROJECT_FILTER } from './host';
@@ -110,6 +110,10 @@ async function load(bytes: Uint8Array, path: string | null): Promise<void> {
         if (!b) continue;
         g.p.write(g.target(l.id, key)!, await decodePng(b));
       }
+    for (const key of ['skew', 'offset'] as const) {
+      const b = files.get(pixelPath(`bake-${t.id}`, key));
+      if (b) g.p.write(g.target(BAKE_LAYER, key)!, await decodePng(b));
+    }
     for (const m of t.bake?.done ?? []) {
       const b = files.get(bakedPath(t.id, m));
       if (!b) continue;
@@ -137,14 +141,14 @@ async function serialise(): Promise<Uint8Array> {
     const lm = s.materials[m.id];
     if (lm) files.set(m.file, lm.bytes);
   }
-  const live = new Set(engine.layerIds());
+  const live = new Set([...engine.layerIds(), BAKE_LAYER]);
   for (const t of p.textureSets) {
     const g = engine.sets.get(t.id);
     if (!g) continue;
     for (const [m, target] of g.baked) files.set(bakedPath(t.id, m), await encodePng(target.width, target.height, 4, g.p.read(target)));
     for (const [layer, keys] of g.pixels) {
       if (!live.has(layer)) continue;
-      for (const [key, target] of keys) files.set(pixelPath(layer, key), await encodePng(target.width, target.height, 4, g.p.read(target)));
+      for (const [key, target] of keys) files.set(pixelPath(layer === BAKE_LAYER ? `bake-${t.id}` : layer, key), await encodePng(target.width, target.height, 4, g.p.read(target)));
     }
   }
   return writeProject({ project: p, files });

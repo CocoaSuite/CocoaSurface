@@ -10,7 +10,7 @@
 - Layer stack per texture set: paint layers, fill layers, groups, painted masks, blend modes, opacity, per-layer channels, visibility and lock, drag to reorder, duplicate.
 - Channels: base colour, roughness, metal, normal, height (turned into normal detail), occlusion, glow, opacity. Each channel can be viewed on its own.
 - `.cocoamat` materials in fill layers: the graph is evaluated on the GPU with CocoaWorlds' own node code, and every exposed parameter is editable live. Unknown node kinds are reported.
-- Baking on the GPU: normal from a high-poly model, world normal, position, ambient occlusion, curvature, thickness, ID. Baked maps become the base of the normal and occlusion channels and drive generated masks (edges, cavities, thin parts, height, facing up).
+- Baking on the GPU: normal from a high-poly model, world normal, position, ambient occlusion, curvature, thickness, ID. Baked maps become the base of the normal and occlusion channels and drive generated masks (edges, cavities, thin parts, height, facing up). A bevel shader rounds hard edges in every baked map; low and high meshes pair up by name, cages are measured per mesh, and skew and offset can be painted to fix spots.
 - Undo and redo for every edit and stroke, autosave to a recovery copy, unsaved-changes guard.
 - Projects (`.cocoasurf`) keep everything editable: model, materials, layers, painted pixels.
 - Export: PNG maps per texture set (naming pattern, size, normal green up/down, packed ORM); a texture set as a `.cocoamat` (opens in CocoaWorlds); a fill's material with its parameter values as a `.cocoamat`.

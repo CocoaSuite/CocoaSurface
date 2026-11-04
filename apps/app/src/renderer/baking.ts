@@ -1,20 +1,54 @@
 import { BAKE_DEFAULTS, type BakeSettings, type TextureSet } from '@cocoasurface/project';
-import { bakeSet, bakeSource, disposeSource, type BakeSource } from './engine/bake';
+import * as THREE from 'three';
+import { autoCage, bakeSet, bakeSource, disposeSource, partName, stem, type BakeSource, type BakeSources } from './engine/bake';
 import { engine } from './engine/engine';
 import { loadModel } from './engine/model';
 import { host, MODEL_FILTER } from './host';
 import { get, set, toast } from './store';
 
-let sources: { low: BakeSource | null; high: BakeSource | null; of: unknown[] } = { low: null, high: null, of: [] };
+let cache: { of: unknown[]; map: Map<string, BakeSource | null> } = { of: [], map: new Map() };
 
-function source(kind: 'low' | 'high'): BakeSource {
-  const m = kind === 'low' ? engine.model! : engine.high!;
-  if (sources.of[0] !== engine.model || sources.of[1] !== engine.high) {
-    if (sources.low) disposeSource(sources.low);
-    if (sources.high) disposeSource(sources.high);
-    sources = { low: null, high: null, of: [engine.model, engine.high] };
+function sourcesFor(useHigh: boolean, match: boolean): BakeSources {
+  if (cache.of[0] !== engine.model || cache.of[1] !== engine.high) {
+    for (const s of cache.map.values()) if (s) disposeSource(s);
+    cache = { of: [engine.model, engine.high], map: new Map() };
   }
-  return (sources[kind] ??= bakeSource(m));
+  const low = engine.model!, from = useHigh ? engine.high! : low;
+  const get = (key: string, f: () => BakeSource | null) => {
+    if (!cache.map.has(key)) cache.map.set(key, f());
+    return cache.map.get(key) ?? null;
+  };
+  const all = get(`${useHigh}:all`, () => bakeSource(from))!;
+  return {
+    all,
+    own: (part) => {
+      if (!useHigh || !match) return all;
+      const k = stem(partName(low, part));
+      return get(`high:${k}`, () => (from.parts.some((_, i) => stem(partName(from, i)) === k) ? bakeSource(from, (i) => stem(partName(from, i)) === k) : null)) ?? all;
+    },
+  };
+}
+
+/** Low-poly meshes of a set, with their names. */
+export function meshesOf(setId: string): { part: number; name: string }[] {
+  const g = engine.sets.get(setId);
+  return g && engine.model ? g.parts.map((part) => ({ part, name: partName(engine.model!, part) })) : [];
+}
+
+/** Which high-poly meshes a low-poly mesh pairs with by name. */
+export function pairsOf(name: string): string[] {
+  const h = engine.high;
+  return h ? h.parts.map((_, i) => partName(h, i)).filter((n) => stem(n) === stem(name)) : [];
+}
+
+/** Cages for the set's meshes from the high-poly surface (shares of the model's size). */
+export function measureCages(setId: string, st: BakeSettings): BakeSettings['cages'] {
+  if (!engine.model || !engine.high) return st.cages;
+  const src = sourcesFor(true, st.matchByName);
+  const diag = new THREE.Box3().setFromObject(engine.model.root).union(src.all.geometry.boundingBox!).getSize(new THREE.Vector3()).length() || 1;
+  const out = { ...st.cages };
+  for (const { part, name } of meshesOf(setId)) out[name] = autoCage(engine.model, part, src.own(part), diag);
+  return out;
 }
 
 export const settingsOf = (t: TextureSet): BakeSettings => ({ ...BAKE_DEFAULTS, size: t.size, ...t.bake?.settings });
@@ -54,18 +88,20 @@ export async function bake(ids: string[], st: BakeSettings): Promise<void> {
   await new Promise((r) => setTimeout(r, 30));
   let finished = 0;
   try {
-    const src = source(useHigh ? 'high' : 'low');
+    const src = sourcesFor(useHigh, st.matchByName);
+    const bevel = get().project?.bevel ?? null;
     for (const [i, id] of ids.entries()) {
       const g = engine.sets.get(id);
       const t = get().project?.textureSets.find((x) => x.id === id);
       if (!g || !t) continue;
       g.ensure();
-      const ok = await bakeSet(g, engine.model, src, useHigh, st, (p) => set((s) => ({ job: s.job && { ...s.job, label: `Baking ${t.name}`, share: (i + p.done / p.total) / ids.length } })), () => stop);
+      const run = { ...st, cages: useHigh && st.autoCage ? measureCages(id, st) : st.cages };
+      const ok = await bakeSet(g, engine.model, src, useHigh, run, bevel, (p) => set((s) => ({ job: s.job && { ...s.job, label: `Baking ${t.name}`, share: (i + p.done / p.total) / ids.length } })), () => stop);
       if (!ok) break;
       finished++;
       set((s) => ({
         dirty: true,
-        project: s.project && { ...s.project, textureSets: s.project.textureSets.map((x) => (x.id === id ? { ...x, bake: { settings: { ...st }, done: [...st.maps] } } : x)) },
+        project: s.project && { ...s.project, textureSets: s.project.textureSets.map((x) => (x.id === id ? { ...x, bake: { settings: { ...run }, done: [...st.maps] } } : x)) },
       }));
       engine.request(id);
     }

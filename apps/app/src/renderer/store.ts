@@ -3,7 +3,7 @@ import { findLayer, type Channel, type Layer, type MeshMap, type Project, type T
 import type { LoadedMaterial } from './engine/library';
 
 export type Tool = 'paint' | 'erase' | 'orbit';
-export type ViewMode = 'material' | Channel | `mesh:${MeshMap}`;
+export type ViewMode = 'material' | Channel | `mesh:${MeshMap}` | 'bake:skew' | 'bake:offset';
 
 export interface Brush {
   size: number;
@@ -37,6 +37,9 @@ interface State {
   tool: Tool;
   brush: Brush;
   symmetry: boolean;
+  /** Painting the bake's skew or offset map instead of layers. */
+  bakePaint: 'skew' | 'offset' | null;
+  bakeValue: number;
   view: View;
   materials: Record<string, LoadedMaterial>;
   warnings: string[];
@@ -57,6 +60,8 @@ export const useApp = create<State>(() => ({
   tool: 'paint',
   brush: { size: 60, flow: 0.8, opacity: 1, hardness: 0.6, spacing: 0.15, color: '#c8b49a', roughness: 0.5, metalness: 0, height: 0.6, glow: '#000000' },
   symmetry: false,
+  bakePaint: null,
+  bakeValue: 1,
   view: { mode: 'material', wire: false, ortho: false, grid: true, light: 1, turn: 0 },
   materials: {},
   warnings: [],
