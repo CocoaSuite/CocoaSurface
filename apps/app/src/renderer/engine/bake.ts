@@ -79,10 +79,75 @@ export function disposeSource(s: BakeSource): void {
   s.idSlot.dispose();
 }
 
-/** A cage for one low-poly mesh: how far in front of and behind it its high-poly surface lies (share of `diag`). */
-export function autoCage(low: LoadedModel, part: number, src: BakeSource, diag: number): { front: number; rear: number } {
-  const g = low.parts[part]!.mesh.geometry;
+/**
+ * Normals averaged over vertices at the same place, ignoring hard edges and UV splits: the directions rays are cast
+ * along, so the two sides of a hard edge meet without a gap or a seam.
+ */
+export function averagedNormals(g: THREE.BufferGeometry): Float32Array {
   const p = g.getAttribute('position'), n = g.getAttribute('normal');
+  const box = g.boundingBox ?? (g.computeBoundingBox(), g.boundingBox!);
+  const q = 1e5 / (box.getSize(new THREE.Vector3()).length() || 1);
+  const key = (i: number) => `${Math.round(p.getX(i) * q)},${Math.round(p.getY(i) * q)},${Math.round(p.getZ(i) * q)}`;
+  const sums = new Map<string, THREE.Vector3>();
+  const keys: string[] = [];
+  // Weighted by the area and corner angle of each face, so a split cube corner points out evenly.
+  const idx = g.index;
+  const count = idx ? idx.count : p.count;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), fn = new THREE.Vector3();
+  const faceSum = new Float32Array(p.count * 3);
+  for (let t = 0; t < count; t += 3) {
+    const v = [0, 1, 2].map((k) => (idx ? idx.getX(t + k) : t + k));
+    a.fromBufferAttribute(p, v[0]!);
+    b.fromBufferAttribute(p, v[1]!);
+    c.fromBufferAttribute(p, v[2]!);
+    fn.crossVectors(e1.subVectors(b, a), e2.subVectors(c, a));
+    if (fn.lengthSq() === 0) continue;
+    fn.normalize();
+    const pts = [a.clone(), b.clone(), c.clone()];
+    for (let k = 0; k < 3; k++) {
+      const o = pts[k]!, u = pts[(k + 1) % 3]!.clone().sub(o), w = pts[(k + 2) % 3]!.clone().sub(o);
+      const ang = u.angleTo(w);
+      const vi = v[k]!;
+      faceSum[vi * 3] = faceSum[vi * 3]! + fn.x * ang;
+      faceSum[vi * 3 + 1] = faceSum[vi * 3 + 1]! + fn.y * ang;
+      faceSum[vi * 3 + 2] = faceSum[vi * 3 + 2]! + fn.z * ang;
+    }
+  }
+  for (let i = 0; i < p.count; i++) {
+    const k = key(i);
+    keys.push(k);
+    let s = sums.get(k);
+    if (!s) sums.set(k, (s = new THREE.Vector3()));
+    s.x += faceSum[i * 3]!;
+    s.y += faceSum[i * 3 + 1]!;
+    s.z += faceSum[i * 3 + 2]!;
+  }
+  const out = new Float32Array(p.count * 3);
+  const v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.copy(sums.get(keys[i]!)!);
+    // Faces wound inconsistently can cancel out: fall back to the vertex normal.
+    if (v.lengthSq() < 1e-12) v.set(n.getX(i), n.getY(i), n.getZ(i));
+    if (v.dot(new THREE.Vector3(n.getX(i), n.getY(i), n.getZ(i))) < 0) v.negate();
+    v.normalize();
+    out.set([v.x, v.y, v.z], i * 3);
+  }
+  return out;
+}
+
+const averaged = new WeakMap<THREE.BufferGeometry, Float32Array>();
+export function cageDirections(g: THREE.BufferGeometry, average: boolean): Float32Array {
+  if (!average) return g.getAttribute('normal').array as Float32Array;
+  let a = averaged.get(g);
+  if (!a) averaged.set(g, (a = averagedNormals(g)));
+  return a;
+}
+
+/** A cage for one low-poly mesh: how far in front of and behind it its high-poly surface lies (share of `diag`). */
+export function autoCage(low: LoadedModel, part: number, src: BakeSource, diag: number, average = true): { front: number; rear: number } {
+  const g = low.parts[part]!.mesh.geometry;
+  const p = g.getAttribute('position');
+  const n = new THREE.BufferAttribute(cageDirections(g, average), 3);
   const far = 0.15 * diag;
   const step = Math.max(1, Math.floor(p.count / 4000));
   const ray = new THREE.Ray();
@@ -109,7 +174,9 @@ export function autoCage(low: LoadedModel, part: number, src: BakeSource, diag: 
 
 const VS = /* glsl */ `
 in vec2 cage;
+in vec3 cageDir;
 out vec3 vWorld;
+out vec3 vDir;
 out vec3 vN;
 out vec2 vUv;
 out vec2 vCage;
@@ -119,6 +186,7 @@ void main() {
   vN = normalize(transpose(inverse(mat3(modelMatrix))) * normal);
   vUv = uv;
   vCage = cage;
+  vDir = normalize(transpose(inverse(mat3(modelMatrix))) * cageDir);
   gl_Position = vec4(uv * 2. - 1., 0., 1.);
 }`;
 
@@ -134,6 +202,7 @@ in vec3 vWorld;
 in vec3 vN;
 in vec2 vUv;
 in vec2 vCage;
+in vec3 vDir;
 out vec4 o;
 uniform BVH bvh;
 uniform sampler2D u_normals;
@@ -278,7 +347,7 @@ void main() {
   // Find the surface: from the cage (painted offset scales it) along the normal (painted skew turns it to the face normal).
   float skew = texture(u_skew, vUv).r;
   float off = texture(u_offset, vUv).r * 2.;
-  vec3 dir = normalize(mix(N, Nf, skew));
+  vec3 dir = normalize(mix(normalize(vDir), Nf, skew));
   float front = vCage.x * off, rear = vCage.y * off;
   vec3 ro = vWorld + dir * front;
   vec3 hn; vec4 hid; float d;
@@ -415,6 +484,7 @@ export async function bakeSet(
       a[k + 1] = c.rear * diag;
     }
     geo.setAttribute('cage', new THREE.BufferAttribute(a, 2));
+    geo.setAttribute('cageDir', new THREE.BufferAttribute(cageDirections(geo, high && st.averageNormals !== false), 3));
   }
 
   const painted = g.pixels.get(BAKE_LAYER);

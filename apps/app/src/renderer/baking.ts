@@ -47,7 +47,7 @@ export function measureCages(setId: string, st: BakeSettings): BakeSettings['cag
   const src = sourcesFor(true, st.matchByName);
   const diag = new THREE.Box3().setFromObject(engine.model.root).union(src.all.geometry.boundingBox!).getSize(new THREE.Vector3()).length() || 1;
   const out = { ...st.cages };
-  for (const { part, name } of meshesOf(setId)) out[name] = autoCage(engine.model, part, src.own(part), diag);
+  for (const { part, name } of meshesOf(setId)) out[name] = autoCage(engine.model, part, src.own(part), diag, st.averageNormals !== false);
   return out;
 }
 

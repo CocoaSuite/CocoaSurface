@@ -77,6 +77,8 @@ export interface BakeSettings {
   autoCage: boolean;
   /** Cage per low-poly mesh (by name), as a share of the model's size. */
   cages: Record<string, { front: number; rear: number }>;
+  /** Cast along normals averaged across hard edges, so they bake smooth and seamless. */
+  averageNormals: boolean;
   /** Samples per texel side: 1, 2 or 4. */
   antialias: 1 | 2 | 4;
 }
@@ -91,7 +93,7 @@ export interface Bevel {
 
 export const BEVEL_DEFAULTS: Bevel = { radius: 0.01, samples: 16, edges: 'convex' };
 
-export const BAKE_DEFAULTS: BakeSettings = { size: 2048, maps: ['normal', 'worldNormal', 'position', 'occlusion', 'curvature', 'thickness', 'id'], useHigh: false, front: 0.03, rear: 0.03, aoSamples: 64, aoDistance: 0.2, idFrom: 'material', matchByName: true, autoCage: true, cages: {}, antialias: 1 };
+export const BAKE_DEFAULTS: BakeSettings = { size: 2048, maps: ['normal', 'worldNormal', 'position', 'occlusion', 'curvature', 'thickness', 'id'], useHigh: false, front: 0.03, rear: 0.03, aoSamples: 64, aoDistance: 0.2, idFrom: 'material', matchByName: true, autoCage: true, averageNormals: true, cages: {}, antialias: 1 };
 
 /** A mask made from a baked mesh map: edges, cavities, thin parts, height or up-facing surfaces. */
 export interface Generator {
