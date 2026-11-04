@@ -14,12 +14,6 @@ uniform int u_src;      // 0 flat, 1 painted (premultiplied), 2 material map
 uniform int u_kind;     // 0 colour, 1 grey, 2 normal
 uniform int u_blend;
 uniform int u_hasMask;
-uniform int u_hasGen;
-uniform sampler2D u_gen;
-uniform int u_genCh;
-uniform float u_genLevel;
-uniform float u_genSpread;
-uniform int u_genInvert;
 uniform int u_vUp;
 uniform int u_flipG;
 uniform vec3 u_value;
@@ -51,12 +45,7 @@ void main() {
     if (u_flipG == 1) s.g = 1. - s.g;
   }
   if (u_hasMask == 1) cov *= texture(u_mask, vUv).r;
-  if (u_hasGen == 1) {
-    vec4 gv = texture(u_gen, vUv);
-    float v = u_genCh == 1 ? gv.g : gv.r;
-    if (u_genInvert == 1) v = 1. - v;
-    cov *= smoothstep(u_genLevel - u_genSpread, u_genLevel + u_genSpread + 1e-4, v);
-  }
+
   float a = clamp(cov * u_opacity, 0., 1.);
   vec3 b = texture(u_below, vUv).rgb;
   vec3 r;
@@ -214,3 +203,48 @@ precision highp float;
 out vec4 o;
 uniform vec4 u_value;
 void main() { o = u_value; }`;
+
+/** One step of a layer's mask over what's below it (grey). */
+export const MASK_FS = /* glsl */ `
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D u_below;
+uniform sampler2D u_tex;
+uniform int u_src;      // 0 value, 1 painted (premultiplied), 2 mesh map, 3 image
+uniform int u_blend;
+uniform int u_ch;
+uniform int u_invert;
+uniform int u_vUp;
+uniform float u_value;
+uniform float u_opacity;
+uniform float u_level;
+uniform float u_spread;
+uniform float u_scale;
+void main() {
+  float b = texture(u_below, vUv).r;
+  float s = u_value, cov = 1.;
+  if (u_src == 1) {
+    vec4 p = texture(u_tex, vUv);
+    cov = p.a;
+    s = p.a > 0. ? p.r / p.a : 0.;
+  } else if (u_src == 2) {
+    vec4 g = texture(u_tex, vUv);
+    float v = u_ch == 1 ? g.g : g.r;
+    if (u_invert == 1) v = 1. - v;
+    s = smoothstep(u_level - u_spread, u_level + u_spread + 1e-4, v);
+  } else if (u_src == 3) {
+    vec2 st = vUv * u_scale;
+    if (u_vUp == 1) st.y = -st.y;
+    s = dot(texture(u_tex, st).rgb, vec3(.299, .587, .114));
+    if (u_invert == 1) s = 1. - s;
+  }
+  float r = s;
+  if (u_blend == 1) r = b * s;
+  else if (u_blend == 2) r = min(b + s, 1.);
+  else if (u_blend == 3) r = max(b - s, 0.);
+  else if (u_blend == 4) r = max(b, s);
+  else if (u_blend == 5) r = min(b, s);
+  r = mix(b, r, clamp(cov * u_opacity, 0., 1.));
+  o = vec4(vec3(r), 1.);
+}`;

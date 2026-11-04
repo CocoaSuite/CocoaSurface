@@ -36,6 +36,25 @@ class Engine {
   private pending = new Map<string, Set<Channel> | 'all'>();
   /** Something on screen changed: draw again. */
   onChange: () => void = () => {};
+  /** Pictures used by masks, by their path in the project. */
+  readonly images = new Map<string, { bytes: Uint8Array; tex: THREE.Texture }>();
+
+  async addImage(file: string, bytes: Uint8Array): Promise<void> {
+    const bmp = await createImageBitmap(new Blob([bytes as BlobPart]), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+    const tex = new THREE.Texture(bmp);
+    tex.flipY = false;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.colorSpace = THREE.NoColorSpace;
+    tex.needsUpdate = true;
+    this.images.set(file, { bytes, tex });
+    for (const id of this.sets.keys()) this.request(id);
+  }
+
+  clearImages(): void {
+    for (const i of this.images.values()) i.tex.dispose();
+    this.images.clear();
+  }
+
   /** The layer whose stroke is in progress. */
   active: { set: string; layer: string; keys: Key[] } | null = null;
 
@@ -140,7 +159,7 @@ class Engine {
       const active = this.active?.set === id ? this.active : null;
       const only = what === 'all' ? null : [...what];
       if (only?.includes('height') && !only.includes('normal')) only.push('normal');
-      g.composite(t.layers, t.channels, t.bump ?? 1, only, active, (l) => this.fillFor(t, l));
+      g.composite(t.layers, t.channels, t.bump ?? 1, only, active, (l) => this.fillFor(t, l), (f) => this.images.get(f)?.tex ?? null);
       this.bind(t, g);
     }
     this.pending.clear();
@@ -207,7 +226,7 @@ class Engine {
   }
 
   layerIds(): string[] {
-    return (get().project?.textureSets ?? []).flatMap((t) => allLayers(t.layers).map((l) => l.id));
+    return (get().project?.textureSets ?? []).flatMap((t) => allLayers(t.layers).flatMap((l) => [l.id, ...(l.mask?.items.map((m) => m.id) ?? [])]));
   }
 }
 

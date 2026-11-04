@@ -1,5 +1,8 @@
-import { Button, Field, NumberField, PanelHeader, Section, Switch } from '@cocoasurface/ui';
-import { BLEND_MODES, CHANNELS, GENERATOR_SOURCES, updateLayer, type BlendMode, type FillLayer, type FlatValues, type Generator, type Layer, type TextureSet } from '@cocoasurface/project';
+import { Button, Field, IconButton, NumberField, PanelHeader, Section, Segmented, Switch } from '@cocoasurface/ui';
+import { engine } from '../engine/engine';
+import { host } from '../host';
+import { MASK_ROOT, setMask } from './Layers';
+import { BLEND_MODES, CHANNELS, GENERATOR_SOURCES, MASK_BLENDS, newMaskItem, uid, updateLayer, type BlendMode, type FillLayer, type FlatValues, type Generator, type Layer, type Mask, type MaskBlend, type MaskItem, type TextureSet } from '@cocoasurface/project';
 import type { Parameter } from '@cocoasurface/materials';
 import type { LoadedMaterial } from '../engine/library';
 import { exportFillMaterial } from '../io';
@@ -139,37 +142,147 @@ function FillProps({ l }: { l: FillLayer }) {
   );
 }
 
-function GeneratorProps({ l, t }: { l: Layer; t: TextureSet }) {
-  const g = l.generator;
-  const put = (v: Partial<Generator> | null, gesture = false) =>
-    change(l, v ? `Change the mask of ${l.name}` : `Remove the generated mask of ${l.name}`, (x) => ({ ...x, generator: v ? { ...(x.generator ?? { source: 'curvature', level: 0.6, spread: 0.1, invert: false }), ...v } : null }), gesture);
-  const src = g && GENERATOR_SOURCES.find((x) => x.value === g.source)!;
+const MASK_ITEMS: { kind: MaskItem['kind']; label: string }[] = [
+  { kind: 'paint', label: 'Paint' },
+  { kind: 'generator', label: 'Generator' },
+  { kind: 'image', label: 'Image' },
+  { kind: 'fill', label: 'Fill' },
+];
+
+function MaskProps({ l, t }: { l: Layer; t: TextureSet }) {
+  const maskItem = useApp((s) => s.maskItem);
+  const maskValue = useApp((s) => s.brush.maskValue);
+  const m = l.mask!;
+  const it = m.items.find((x) => x.id === maskItem);
+  const putMask = (label: string, f: (m: Mask) => Mask, gesture = false) => change(l, label, (x) => ({ ...x, mask: x.mask && f(x.mask) }), gesture);
+  const putItem = (v: Partial<MaskItem>, gesture = false) => putMask(`Change ${it!.name}`, (mm) => ({ ...mm, items: mm.items.map((x) => (x.id === it!.id ? { ...x, ...v } : x)) }), gesture);
+  const add = (kind: MaskItem['kind']) => {
+    const n = newMaskItem(kind);
+    const at = it ? m.items.indexOf(it) : 0;
+    putMask(`Add ${n.name} to the mask`, (mm) => ({ ...mm, items: [...mm.items.slice(0, at), n, ...mm.items.slice(at)] }));
+    set({ maskItem: n.id });
+  };
+  const move = (d: -1 | 1) => {
+    const i = m.items.indexOf(it!);
+    const j = i + d;
+    if (j < 0 || j >= m.items.length) return;
+    putMask('Move a mask item', (mm) => {
+      const items = [...mm.items];
+      [items[i], items[j]] = [items[j]!, items[i]!];
+      return { ...mm, items };
+    });
+  };
+  const pickImage = async () => {
+    const [f] = await host.open([{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]);
+    if (!f) return;
+    const file = `masks/${uid()}.${f.name.split('.').pop()!.toLowerCase()}`;
+    await engine.addImage(file, f.bytes);
+    putItem({ image: { file, name: f.name, scale: it?.image?.scale ?? 1, invert: it?.image?.invert ?? false }, name: f.name.replace(/\.[^.]+$/, '') });
+  };
+  const src = it?.generator && GENERATOR_SOURCES.find((x) => x.value === it.generator!.source)!;
   return (
     <>
-      <Section title="Generated mask" />
-      <Field label="From">
-        <select className="cs-select" value={g?.source ?? ''} onChange={(e) => put(e.target.value ? { source: e.target.value as Generator['source'] } : null)}>
-          <option value="">None</option>
-          {GENERATOR_SOURCES.map((x) => (
-            <option key={x.value} value={x.value}>
-              {x.label}
-            </option>
-          ))}
-        </select>
+      <Section title="Mask" />
+      <Field label="Start">
+        <Segmented label="Mask starts" options={[{ value: '0', label: 'Black' }, { value: '1', label: 'White' }]} value={String(m.base) as '0' | '1'} onChange={(v) => putMask('Change the mask', (mm) => ({ ...mm, base: v === '1' ? 1 : 0 }))} />
       </Field>
-      {g && (
+      <span className="cs-note">Add to the mask</span>
+      <div className="cs-checks">
+        {MASK_ITEMS.map((x) => (
+          <button key={x.kind} type="button" className="cs-chip" onClick={() => add(x.kind)}>
+            {x.label}
+          </button>
+        ))}
+      </div>
+      {it && (
         <>
-          {!t.bake?.done.includes(src!.map) && <span className="cs-note warn">Bake the {src!.map === 'worldNormal' ? 'world normal' : src!.map} mesh map to use this.</span>}
-          <Field label="Level">
-            <Range value={g.level} min={0} max={1} label="Level" onChange={(v) => put({ level: v }, true)} onCommit={() => commit(`Change the mask of ${l.name}`)} />
+          <Section
+            title={it.name}
+            action={
+              <span className="cs-acts">
+                <IconButton icon="up" label="Move up" onClick={() => move(-1)} />
+                <IconButton icon="down" label="Move down" onClick={() => move(1)} />
+                <IconButton
+                  icon="trash"
+                  label="Delete"
+                  onClick={() => {
+                    putMask(`Delete ${it.name}`, (mm) => ({ ...mm, items: mm.items.filter((x) => x.id !== it.id) }));
+                    set({ maskItem: MASK_ROOT });
+                  }}
+                />
+              </span>
+            }
+          />
+          <Field label="Blend">
+            <select className="cs-select" value={it.blend} onChange={(e) => putItem({ blend: e.target.value as MaskBlend })}>
+              {MASK_BLENDS.map((b) => (
+                <option key={b.value} value={b.value}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
           </Field>
-          <Field label="Softness">
-            <Range value={g.spread} min={0} max={0.5} label="Softness" onChange={(v) => put({ spread: v }, true)} onCommit={() => commit(`Change the mask of ${l.name}`)} />
+          <Field label="Opacity">
+            <Range value={it.opacity} min={0} max={1} label="Opacity" onChange={(v) => putItem({ opacity: v }, true)} onCommit={() => commit(`Change ${it.name}`)} />
           </Field>
-          <Field label="Invert">
-            <Switch checked={g.invert} label="Invert" onChange={(v) => put({ invert: v })} />
-          </Field>
-          {l.mask && <span className="cs-note">Multiplied by the painted mask.</span>}
+          {it.kind === 'paint' && (
+            <>
+              <Field label="Paints">
+                <Segmented label="Paints" options={[{ value: '1', label: 'White' }, { value: '0', label: 'Black' }]} value={maskValue >= 0.5 ? '1' : '0'} onChange={(v) => set((s) => ({ brush: { ...s.brush, maskValue: v === '1' ? 1 : 0 } }))} />
+              </Field>
+              <Field label="Grey">
+                <Range value={maskValue} min={0} max={1} label="Painted grey" onChange={(v) => set((s) => ({ brush: { ...s.brush, maskValue: v } }))} onCommit={() => {}} />
+              </Field>
+              <span className="cs-note">White shows the layer, black hides it. Erase takes strokes away.</span>
+            </>
+          )}
+          {it.kind === 'generator' && it.generator && (
+            <>
+              <Field label="From">
+                <select className="cs-select" value={it.generator.source} onChange={(e) => putItem({ generator: { ...it.generator!, source: e.target.value as Generator['source'] } })}>
+                  {GENERATOR_SOURCES.map((x) => (
+                    <option key={x.value} value={x.value}>
+                      {x.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {!t.bake?.done.includes(src!.map) && <span className="cs-note warn">Bake the {src!.map === 'worldNormal' ? 'world normal' : src!.map} mesh map to use this.</span>}
+              <Field label="Level">
+                <Range value={it.generator.level} min={0} max={1} label="Level" onChange={(v) => putItem({ generator: { ...it.generator!, level: v } }, true)} onCommit={() => commit(`Change ${it.name}`)} />
+              </Field>
+              <Field label="Softness">
+                <Range value={it.generator.spread} min={0} max={0.5} label="Softness" onChange={(v) => putItem({ generator: { ...it.generator!, spread: v } }, true)} onCommit={() => commit(`Change ${it.name}`)} />
+              </Field>
+              <Field label="Invert">
+                <Switch checked={it.generator.invert} label="Invert" onChange={(v) => putItem({ generator: { ...it.generator!, invert: v } })} />
+              </Field>
+            </>
+          )}
+          {it.kind === 'image' && (
+            <>
+              <Field label="Image">
+                <Button size="sm" onClick={() => void pickImage()}>
+                  {it.image ? it.image.name : 'Choose…'}
+                </Button>
+              </Field>
+              {it.image && (
+                <>
+                  <Field label="Repeat">
+                    <Range value={it.image.scale} min={0.25} max={16} step={0.25} label="Repeat" onChange={(v) => putItem({ image: { ...it.image!, scale: v } }, true)} onCommit={() => commit(`Change ${it.name}`)} />
+                  </Field>
+                  <Field label="Invert">
+                    <Switch checked={it.image.invert} label="Invert" onChange={(v) => putItem({ image: { ...it.image!, invert: v } })} />
+                  </Field>
+                </>
+              )}
+            </>
+          )}
+          {it.kind === 'fill' && (
+            <Field label="Value">
+              <Range value={it.value ?? 1} min={0} max={1} label="Value" onChange={(v) => putItem({ value: v }, true)} onCommit={() => commit(`Change ${it.name}`)} />
+            </Field>
+          )}
         </>
       )}
     </>
@@ -215,7 +328,7 @@ function BrushProps({ l }: { l: Layer }) {
 export function Properties() {
   useApp((s) => s.project);
   useApp((s) => s.layerId);
-  const maskEdit = useApp((s) => s.maskEdit);
+  const maskEdit = useApp((s) => s.maskItem) !== null;
   const t = currentSet();
   const l = currentLayer();
   if (!t || !l)
@@ -229,10 +342,16 @@ export function Properties() {
     );
   return (
     <div className="cs-pane">
-      <PanelHeader title={l.name} />
+      <PanelHeader title={maskEdit ? `${l.name}: mask` : l.name}>
+        {maskEdit && (
+          <Button size="sm" onClick={() => set({ maskItem: null })}>
+            Layer
+          </Button>
+        )}
+      </PanelHeader>
       <div className="cs-scroll">
         <div className="cs-props" style={{ padding: '0 4px 14px' }}>
-          {l.kind !== 'group' && (
+          {l.kind !== 'group' && !maskEdit && (
             <Field label="Blend">
               <select className="cs-select" value={l.blend} onChange={(e) => change(l, `Change blend of ${l.name}`, (x) => ({ ...x, blend: e.target.value as BlendMode }))}>
                 {BLEND_MODES.map((m) => (
@@ -243,21 +362,37 @@ export function Properties() {
               </select>
             </Field>
           )}
-          <Field label="Opacity">
+          {!maskEdit && <Field label="Opacity">
             <Range value={l.opacity} min={0} max={1} label="Opacity" onChange={(v) => change(l, '', (x) => ({ ...x, opacity: v }), true)} onCommit={() => commit(`Change opacity of ${l.name}`)} />
-          </Field>
-          <span className="cs-note">Channels</span>
-          <Chips
+          </Field>}
+          {!maskEdit && <span className="cs-note">Channels</span>}
+          {!maskEdit && <Chips
             options={CHANNELS.filter((c) => t.channels.includes(c.id)).map((c) => ({ value: c.id, label: c.label, disabled: l.kind === 'paint' && c.id === 'normal' }))}
             value={l.channels}
             onChange={(v) => change(l, `Change channels of ${l.name}`, (x) => ({ ...x, channels: v }))}
-          />
-          {maskEdit && l.mask && <span className="cs-note">Painting the mask: Paint shows the layer, Erase hides it.</span>}
+          />}
+          {maskEdit && l.mask && <MaskProps l={l} t={t} />}
           {l.kind === 'paint' && !maskEdit && <BrushProps l={l} />}
           {l.kind === 'paint' && !maskEdit && <span className="cs-note">Normal detail comes from painted height.</span>}
-          {l.kind === 'fill' && <FillProps l={l} />}
-          {l.kind === 'fill' && !l.mask && !l.generator && <span className="cs-note">Add a mask to paint where this fill shows, or generate one from the mesh maps.</span>}
-          {l.kind !== 'group' && <GeneratorProps l={l} t={t} />}
+          {l.kind === 'fill' && !maskEdit && <FillProps l={l} />}
+          {l.kind !== 'group' && !l.mask && (
+            <>
+              <Section title="Mask" />
+              <div className="cs-checks">
+                <Button size="sm" onClick={() => setMask(0)}>
+                  Add black mask
+                </Button>
+                <Button size="sm" onClick={() => setMask(1)}>
+                  Add white mask
+                </Button>
+              </div>
+            </>
+          )}
+          {l.kind !== 'group' && l.mask && !maskEdit && (
+            <Button size="sm" onClick={() => set({ maskItem: l.mask!.items[0]?.id ?? MASK_ROOT })}>
+              Edit the mask
+            </Button>
+          )}
           {l.kind === 'group' && <span className="cs-note">The group's opacity and visibility apply to the layers in it.</span>}
         </div>
       </div>

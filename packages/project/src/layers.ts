@@ -78,6 +78,7 @@ export function moveLayer(layers: Layer[], id: string, to: Place): Layer[] {
 export function duplicateLayer(l: Layer, ids = new Map<string, string>()): { layer: Layer; ids: Map<string, string> } {
   const id = uid();
   ids.set(l.id, id);
-  if (l.kind === 'group') return { layer: { ...l, id, children: l.children.map((c) => duplicateLayer(c, ids).layer) }, ids };
-  return { layer: structuredClone({ ...l, id }), ids };
+  const mask = l.mask && { ...l.mask, items: l.mask.items.map((m) => { const n = uid(); ids.set(m.id, n); return { ...structuredClone(m), id: n }; }) };
+  if (l.kind === 'group') return { layer: { ...l, id, mask, children: l.children.map((c) => duplicateLayer(c, ids).layer) }, ids };
+  return { layer: { ...structuredClone(l), id, mask }, ids };
 }

@@ -1,6 +1,6 @@
 import { BAKE_DEFAULTS, type BakeSettings, type TextureSet } from '@cocoasurface/project';
 import * as THREE from 'three';
-import { autoCage, bakeSet, bakeSource, disposeSource, partName, stem, type BakeSource, type BakeSources } from './engine/bake';
+import { autoCage, cageDirections, bakeSet, bakeSource, disposeSource, partName, stem, type BakeSource, type BakeSources } from './engine/bake';
 import { engine } from './engine/engine';
 import { loadModel } from './engine/model';
 import { host, MODEL_FILTER } from './host';
@@ -112,4 +112,30 @@ export async function bake(ids: string[], st: BakeSettings): Promise<void> {
   }
   if (stop) toast(finished ? `Stopped after ${finished} texture set(s)` : 'Baking stopped');
   else if (finished) toast(`Baked ${finished} texture set${finished === 1 ? '' : 's'}`);
+}
+
+/** The cage of a set's meshes as geometry: each mesh pushed out along its cast directions by its front distance. */
+export function cageGeometry(setId: string, st: BakeSettings): THREE.BufferGeometry[] {
+  const low = engine.model;
+  if (!low) return [];
+  const box = new THREE.Box3().setFromObject(low.root);
+  if (engine.high) box.union(new THREE.Box3().setFromObject(engine.high.root));
+  const diag = box.getSize(new THREE.Vector3()).length() || 1;
+  const useHigh = st.useHigh && !!engine.high;
+  return meshesOf(setId).map(({ part, name }) => {
+    const src = low.parts[part]!.mesh.geometry;
+    const c = useHigh ? (st.cages[name] ?? { front: st.front, rear: st.rear }) : { front: 0.0005, rear: 0.0005 };
+    const dir = cageDirections(src, useHigh && st.averageNormals !== false);
+    const p = src.getAttribute('position');
+    const out = new Float32Array(p.count * 3);
+    for (let i = 0; i < p.count; i++) {
+      out[i * 3] = p.getX(i) + dir[i * 3]! * c.front * diag;
+      out[i * 3 + 1] = p.getY(i) + dir[i * 3 + 1]! * c.front * diag;
+      out[i * 3 + 2] = p.getZ(i) + dir[i * 3 + 2]! * c.front * diag;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(out, 3));
+    if (src.index) g.setIndex(src.index);
+    return g;
+  });
 }

@@ -9,10 +9,13 @@ A ZIP. The first entry is `mimetype`, stored, holding `application/vnd.cocoasuit
 | `highpoly/<file>` | The high-poly model baked from, unchanged (if any). |
 | `baked/<set>/<map>.png` | Baked mesh maps, RGBA, row 0 at v = 0. |
 | `materials/<id>.cocoamat` | Library materials, unchanged. |
-| `pixels/<layer>/<channel>.png` | Painted pixels, RGBA, premultiplied, row 0 at v = 0. `mask.png` is a layer's mask (grey, white shows). |
+| `pixels/<layer>/<channel>.png` | Painted pixels, RGBA, premultiplied, row 0 at v = 0. A mask's paint item stores `pixels/<item>/grey.png` (premultiplied grey). |
+| `masks/<id>.<ext>` | Pictures used by mask image items. |
 
 Readers refuse a newer `version`, broken layers, duplicate layer ids, and missing model or material entries. Unknown `extensions` are kept.
 
 ## Texture set as `.cocoamat`
 
 Standard `.cocoamat` 1.0 (see CocoaWorlds' `docs/cocoamat-format.md`): one Image node per map wired to its output node, `normalGreen: "down"`. `extensions.cocoasurface` holds the texture set (its layer stack), and `cocoasurface/…` entries hold its painted pixels and the materials its fills use. CocoaWorlds ignores both.
+
+Version 1 files from before mask stacks (`mask: true`, a layer `generator`) are converted when read.

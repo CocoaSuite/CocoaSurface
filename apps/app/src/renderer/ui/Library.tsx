@@ -20,7 +20,7 @@ export function useMaterial(id: string): void {
   const layer: FillLayer = { ...newFillLayer(m.file.manifest.name, t.channels.filter((c) => (c !== 'opacity' && c !== 'glow') || outputNodes(m.file.graph).has(c))), use };
   const at = l ? placeOf(t.layers, l.id)! : { parent: null, index: 0 };
   editSet(`Add ${m.file.manifest.name}`, (s) => ({ ...s, layers: insertLayer(s.layers, layer, at) }));
-  set({ layerId: layer.id, maskEdit: false });
+  set({ layerId: layer.id, maskItem: null });
 }
 
 export function Library() {

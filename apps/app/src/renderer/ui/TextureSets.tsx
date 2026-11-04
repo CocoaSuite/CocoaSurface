@@ -1,6 +1,6 @@
 import { Field, PanelHeader, Section } from '@cocoasurface/ui';
 import { CHANNELS, MESH_MAPS, TEXTURE_SIZES, type TextureSize } from '@cocoasurface/project';
-import { Button, Segmented } from '@cocoasurface/ui';
+import { Button, Segmented, Switch } from '@cocoasurface/ui';
 import { commit, currentSet, editSet, set, useApp } from '../store';
 import { Chips, Range } from './controls';
 
@@ -16,7 +16,7 @@ export function TextureSets({ onBake }: { onBake: () => void }) {
       <PanelHeader title="Texture sets" />
       <div className="cs-scroll" style={{ flex: 'none', maxHeight: 180 }}>
         {project.textureSets.map((x) => (
-          <div key={x.id} className={`cs-lr${x.id === setId ? ' on' : ''}`} onClick={() => set({ setId: x.id, layerId: x.layers[0]?.id ?? null, maskEdit: false })}>
+          <div key={x.id} className={`cs-lr${x.id === setId ? ' on' : ''}`} onClick={() => set({ setId: x.id, layerId: x.layers[0]?.id ?? null, maskItem: null })}>
             <span className="cs-ln" style={{ paddingLeft: 8 }}>{x.name}</span>
             <span className="cs-meta">{x.size}</span>
           </div>
@@ -78,6 +78,9 @@ export function TextureSets({ onBake }: { onBake: () => void }) {
               )}
             </>
           )}
+          <Field label="Cage">
+            <Switch checked={view.cage} onChange={(v) => set((s) => ({ view: { ...s.view, cage: v } }))} label="Show the bake cage" />
+          </Field>
           <Button size="sm" onClick={onBake} disabled={!!useApp.getState().job}>
             {t.bake?.done.length ? 'Bake again…' : 'Bake mesh maps…'}
           </Button>

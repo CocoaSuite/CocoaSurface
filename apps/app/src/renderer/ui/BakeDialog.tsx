@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Dialog, Field, Switch } from '@cocoasurface/ui';
 import { BEVEL_DEFAULTS, MESH_MAPS, TEXTURE_SIZES, type BakeSettings, type Bevel, type TextureSize } from '@cocoasurface/project';
 import { bake, dropHighPoly, loadHighPoly, measureCages, meshesOf, pairsOf, settingsOf } from '../baking';
-import { commit, currentSet, edit, live, useApp } from '../store';
+import { commit, currentSet, edit, live, set, useApp } from '../store';
 import { Chips, Range } from './controls';
 
 const pct = (v: number) => Math.round(v * 1000) / 10;
@@ -17,6 +17,9 @@ export function BakeDialog({ onClose }: { onClose: () => void }) {
   const setBevel = (b: Bevel | null) => edit(b ? (bevel ? 'Change the bevel shader' : 'Add a bevel shader') : 'Remove the bevel shader', (p) => ({ ...p, bevel: b }));
   const meshes = meshesOf(t.id);
   const high = !!project.highPoly;
+  const cage = useApp((s) => s.view.cage);
+  useEffect(() => set({ cagePreview: st }), [st]);
+  useEffect(() => () => set({ cagePreview: null }), []);
   const go = () => {
     onClose();
     void bake(all ? project.textureSets.map((x) => x.id) : [t.id], st);
@@ -106,6 +109,10 @@ export function BakeDialog({ onClose }: { onClose: () => void }) {
                 <label>
                   <Switch checked={st.matchByName} onChange={(v) => put('matchByName', v)} label="Pair low and high meshes by name" />
                   <span>Match names</span>
+                </label>
+                <label>
+                  <Switch checked={cage} onChange={(v) => set((s) => ({ view: { ...s.view, cage: v } }))} label="Show the cage in the viewport" />
+                  <span>Show cage</span>
                 </label>
                 <label>
                   <Switch checked={st.autoCage} onChange={(v) => put('autoCage', v)} label="Measure each mesh's cage before baking" />

@@ -110,11 +110,15 @@ test('bake from a high-poly model, drive a mask with the maps, save and reopen',
     assert.ok(curv.sd > 2, 'curvature varies over the bumps');
 
     await pg.getByLabel('New fill layer').click();
-    await pg.locator('.cs-props select').filter({ has: pg.locator('option', { hasText: 'Edges (curvature)' }) }).selectOption('curvature');
     const rough = pg.locator('.cs-props .cs-f', { hasText: 'Roughness' }).locator('input.cs-input').last();
     await rough.fill('0');
     await rough.press('Enter');
+    await pg.getByRole('button', { name: 'Add black mask' }).click();
+    await pg.waitForTimeout(800);
+    const hidden = await mapStats('display', 'roughness');
+    await pg.locator('.cs-props .cs-chip', { hasText: 'Generator' }).click();
     await pg.waitForTimeout(1500);
+    assert.ok(hidden.sd < 1, 'a black mask hides the fill everywhere');
     const masked = await mapStats('display', 'roughness');
     assert.ok(masked.sd > 1, 'the edge mask shows the fill on part of the model only');
 

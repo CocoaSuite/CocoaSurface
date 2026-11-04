@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { findLayer, type Channel, type Layer, type MeshMap, type Project, type TextureSet } from '@cocoasurface/project';
+import { findLayer, type Channel, type Layer, type BakeSettings, type MeshMap, type Project, type TextureSet } from '@cocoasurface/project';
 import type { LoadedMaterial } from './engine/library';
 
 export type Tool = 'paint' | 'erase' | 'orbit';
@@ -16,6 +16,8 @@ export interface Brush {
   metalness: number;
   height: number;
   glow: string;
+  /** What a brush paints into a mask: 1 white (shows), 0 black (hides). */
+  maskValue: number;
 }
 
 export interface View {
@@ -25,6 +27,8 @@ export interface View {
   grid: boolean;
   light: number;
   turn: number;
+  /** Show the bake cage of the current texture set. */
+  cage: boolean;
 }
 
 interface State {
@@ -33,13 +37,16 @@ interface State {
   dirty: boolean;
   setId: string | null;
   layerId: string | null;
-  maskEdit: boolean;
+  /** The mask item being edited, if the mask rather than the layer is selected. */
+  maskItem: string | null;
   tool: Tool;
   brush: Brush;
   symmetry: boolean;
   /** Painting the bake's skew or offset map instead of layers. */
   bakePaint: 'skew' | 'offset' | null;
   bakeValue: number;
+  /** Bake settings being edited, so the cage shown follows them. */
+  cagePreview: BakeSettings | null;
   view: View;
   materials: Record<string, LoadedMaterial>;
   warnings: string[];
@@ -56,13 +63,14 @@ export const useApp = create<State>(() => ({
   dirty: false,
   setId: null,
   layerId: null,
-  maskEdit: false,
+  maskItem: null,
   tool: 'paint',
-  brush: { size: 60, flow: 0.8, opacity: 1, hardness: 0.6, spacing: 0.15, color: '#c8b49a', roughness: 0.5, metalness: 0, height: 0.6, glow: '#000000' },
+  brush: { size: 60, flow: 0.8, opacity: 1, hardness: 0.6, spacing: 0.15, color: '#c8b49a', roughness: 0.5, metalness: 0, height: 0.6, glow: '#000000', maskValue: 1 },
   symmetry: false,
   bakePaint: null,
   bakeValue: 1,
-  view: { mode: 'material', wire: false, ortho: false, grid: true, light: 1, turn: 0 },
+  cagePreview: null,
+  view: { mode: 'material', wire: false, ortho: false, grid: true, light: 1, turn: 0, cage: false },
   materials: {},
   warnings: [],
   toast: null,

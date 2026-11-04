@@ -38,7 +38,7 @@ export function confirmDiscard(): boolean {
 function start(project: Project, path: string | null, materials: Record<string, LoadedMaterial>, warnings: string[]): void {
   clearHistory();
   for (const id of Object.keys(get().materials)) forgetMaterial(id);
-  set({ project, path, dirty: false, materials, warnings, setId: project.textureSets[0]?.id ?? null, layerId: project.textureSets[0]?.layers[0]?.id ?? null, maskEdit: false });
+  set({ project, path, dirty: false, materials, warnings, setId: project.textureSets[0]?.id ?? null, layerId: project.textureSets[0]?.layers[0]?.id ?? null, maskItem: null });
   engine.syncSets(project);
   view?.showModel();
   title();
@@ -98,6 +98,11 @@ async function load(bytes: Uint8Array, path: string | null): Promise<void> {
       }
     }
   } else engine.setModel(null, null);
+  engine.clearImages();
+  for (const t of project.textureSets)
+    for (const l of allLayers(t.layers))
+      for (const m of l.mask?.items ?? [])
+        if (m.image && files.has(m.image.file)) await engine.addImage(m.image.file, files.get(m.image.file)!);
   start(project, path, materials, warnings);
   await engine.ready();
   for (const t of project.textureSets) {
@@ -105,10 +110,10 @@ async function load(bytes: Uint8Array, path: string | null): Promise<void> {
     if (!g) continue;
     g.ensure();
     for (const l of allLayers(t.layers))
-      for (const key of [...l.channels, 'mask'] as const) {
-        const b = files.get(pixelPath(l.id, key));
+      for (const [id, key] of [...l.channels.map((c) => [l.id, c] as const), ...(l.mask?.items ?? []).filter((m) => m.kind === 'paint').map((m) => [m.id, 'grey'] as const)]) {
+        const b = files.get(pixelPath(id, key));
         if (!b) continue;
-        g.p.write(g.target(l.id, key)!, await decodePng(b));
+        g.p.write(g.target(id, key)!, await decodePng(b));
       }
     for (const key of ['skew', 'offset'] as const) {
       const b = files.get(pixelPath(`bake-${t.id}`, key));
@@ -137,6 +142,7 @@ async function serialise(): Promise<Uint8Array> {
   const files = new Map<string, Uint8Array>();
   if (p.model && engine.modelBytes) files.set(p.model.file, engine.modelBytes);
   if (p.highPoly && engine.highBytes) files.set(p.highPoly.file, engine.highBytes);
+  for (const [file, img] of engine.images) files.set(file, img.bytes);
   for (const m of p.library) {
     const lm = s.materials[m.id];
     if (lm) files.set(m.file, lm.bytes);

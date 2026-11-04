@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
-import { BLEND_MODES, GENERATOR_SOURCES, channelInfo, type Channel, type FillLayer, type Layer, type TextureSet } from '@cocoasurface/project';
+import { BLEND_MODES, GENERATOR_SOURCES, MASK_BLENDS, type Mask, channelInfo, type Channel, type FillLayer, type Layer, type TextureSet } from '@cocoasurface/project';
 import type { Part } from './model';
 import type { RoleTextures } from './library';
-import { COMMIT_FS, COPY_FS, DAB_FS, DIST_FS, DIST_VS, FILL_FS, FINAL_FS, ISLAND_FS, LAYER_FS, MAX_DABS, QUAD_VS, UV_VS } from './shaders';
+import { COMMIT_FS, COPY_FS, MASK_FS, DAB_FS, DIST_FS, DIST_VS, FILL_FS, FINAL_FS, ISLAND_FS, LAYER_FS, MAX_DABS, QUAD_VS, UV_VS } from './shaders';
 
-export type Key = Channel | 'mask' | 'skew' | 'offset';
+export type Key = Channel | 'grey' | 'skew' | 'offset';
 /** Pixels painted for baking (skew and offset) live under this layer id. */
 export const BAKE_LAYER = '#bake';
 
@@ -44,10 +44,14 @@ export class Passes {
   readonly quad = new FullScreenQuad();
   readonly layer = shader(LAYER_FS, {
     u_below: { value: null }, u_tex: { value: null }, u_mask: { value: null }, u_src: { value: 0 }, u_kind: { value: 0 }, u_blend: { value: 0 },
-    u_hasMask: { value: 0 }, u_hasGen: { value: 0 }, u_gen: { value: null }, u_genCh: { value: 0 }, u_genLevel: { value: 0.5 }, u_genSpread: { value: 0.1 }, u_genInvert: { value: 0 }, u_vUp: { value: 0 }, u_flipG: { value: 0 }, u_value: { value: new THREE.Vector3() }, u_scale: { value: 1 }, u_opacity: { value: 1 },
+    u_hasMask: { value: 0 }, u_vUp: { value: 0 }, u_flipG: { value: 0 }, u_value: { value: new THREE.Vector3() }, u_scale: { value: 1 }, u_opacity: { value: 1 },
   });
   readonly final = shader(FINAL_FS, { u_src: { value: null }, u_island: { value: null }, u_height: { value: null }, u_ao: { value: null }, u_hasAo: { value: 0 }, u_kind: { value: 0 }, u_hasHeight: { value: 0 }, u_size: { value: 1 }, u_bump: { value: 8 } });
   readonly commit = shader(COMMIT_FS, { u_dst: { value: null }, u_stroke: { value: null }, u_value: { value: new THREE.Vector4() }, u_opacity: { value: 1 }, u_erase: { value: 0 } });
+  readonly mask = shader(MASK_FS, {
+    u_below: { value: null }, u_tex: { value: null }, u_src: { value: 0 }, u_blend: { value: 0 }, u_ch: { value: 0 }, u_invert: { value: 0 }, u_vUp: { value: 0 },
+    u_value: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_scale: { value: 1 },
+  });
   readonly copy = shader(COPY_FS, { u_src: { value: null } });
   readonly fill = shader(FILL_FS, { u_value: { value: new THREE.Vector4() } });
   readonly island = shader(ISLAND_FS, {}, UV_VS, { side: THREE.DoubleSide });
@@ -272,7 +276,7 @@ export class SetGPU {
     let t = m.get(key);
     if (!t && create) {
       t = rt(this.size);
-      this.p.clear(t, key === 'mask' ? [1, 1, 1, 1] : key === 'skew' ? [0, 0, 0, 1] : key === 'offset' ? [0.5, 0.5, 0.5, 1] : [0, 0, 0, 0]);
+      this.p.clear(t, key === 'skew' ? [0, 0, 0, 1] : key === 'offset' ? [0.5, 0.5, 0.5, 1] : [0, 0, 0, 0]);
       m.set(key, t);
     }
     return t ?? null;
@@ -329,7 +333,7 @@ export class SetGPU {
       u.u_stroke!.value = this.stroke!.texture;
       (u.u_value!.value as THREE.Vector4).set(v[0] * v[3], v[1] * v[3], v[2] * v[3], v[3]);
       u.u_opacity!.value = o.opacity;
-      u.u_erase!.value = o.erase && key !== 'mask' && key !== 'skew' && key !== 'offset' ? 1 : 0;
+      u.u_erase!.value = o.erase && key !== 'skew' && key !== 'offset' ? 1 : 0;
       this.p.run(this.p.commit, out);
     }
   }
@@ -347,12 +351,75 @@ export class SetGPU {
     return old;
   }
 
+  // Masks
+
+  private maskRts = new Map<string, THREE.WebGLRenderTarget>();
+  private maskWork: [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget] | null = null;
+
+  /** A layer's mask, built from its items. */
+  maskOf(layer: string, m: Mask, active: { layer: string; keys: Key[] } | null, image: (file: string) => THREE.Texture | null): THREE.WebGLRenderTarget {
+    if (!this.maskWork || this.maskWork[0].width !== this.size) {
+      this.maskWork?.forEach((t) => t.dispose());
+      this.maskWork = [rt(this.size), rt(this.size)];
+    }
+    let [a, b] = this.maskWork;
+    this.p.clear(a, [m.base, m.base, m.base, 1]);
+    const u = this.p.mask.uniforms;
+    for (const it of [...m.items].reverse()) {
+      if (!it.visible || it.opacity <= 0) continue;
+      u.u_below!.value = a.texture;
+      u.u_tex!.value = null;
+      u.u_blend!.value = Math.max(0, MASK_BLENDS.findIndex((x) => x.value === it.blend));
+      u.u_opacity!.value = it.opacity;
+      u.u_invert!.value = 0;
+      u.u_vUp!.value = this.vUp ? 1 : 0;
+      if (it.kind === 'paint') {
+        const t = (active?.layer === it.id ? this.live.get('grey') : null) ?? this.target(it.id, 'grey', false);
+        if (!t) continue;
+        u.u_src!.value = 1;
+        u.u_tex!.value = t.texture;
+      } else if (it.kind === 'generator' && it.generator) {
+        const g = it.generator;
+        const src = GENERATOR_SOURCES.find((x) => x.value === g.source)!;
+        const t = this.baked.get(src.map);
+        if (!t) continue;
+        u.u_src!.value = 2;
+        u.u_tex!.value = t.texture;
+        u.u_ch!.value = src.map === 'position' || src.map === 'worldNormal' ? 1 : 0;
+        u.u_level!.value = g.level;
+        u.u_spread!.value = g.spread;
+        u.u_invert!.value = (g.invert ? 1 : 0) ^ (g.source === 'occlusion' ? 1 : 0);
+      } else if (it.kind === 'image' && it.image) {
+        const t = image(it.image.file);
+        if (!t) continue;
+        u.u_src!.value = 3;
+        u.u_tex!.value = t;
+        u.u_scale!.value = it.image.scale;
+        u.u_invert!.value = it.image.invert ? 1 : 0;
+      } else {
+        u.u_src!.value = 0;
+        u.u_value!.value = it.value ?? 1;
+      }
+      this.p.run(this.p.mask, b);
+      [a, b] = [b, a];
+    }
+    let out = this.maskRts.get(layer);
+    if (!out || out.width !== this.size) {
+      out?.dispose();
+      this.maskRts.set(layer, (out = rt(this.size)));
+    }
+    this.p.copyTo(a.texture, out);
+    return out;
+  }
+
   // Compositing
 
-  composite(layers: Layer[], channels: Channel[], bump: number, only: Channel[] | null, active: { layer: string; keys: Key[] } | null, fillTextures: (l: FillLayer) => { tex: RoleTextures; surface: Record<string, unknown> } | null): void {
+  composite(layers: Layer[], channels: Channel[], bump: number, only: Channel[] | null, active: { layer: string; keys: Key[] } | null, fillTextures: (l: FillLayer) => { tex: RoleTextures; surface: Record<string, unknown> } | null, image: (file: string) => THREE.Texture | null = () => null): void {
     this.ensure();
     const island = this.islands();
     const order = flatten(layers).reverse();
+    const masks = new Map<string, THREE.WebGLRenderTarget>();
+    for (const { layer: l } of order) if (l.mask) masks.set(l.id, this.maskOf(l.id, l.mask, active, image));
     const ch = [...(only ?? channels)].filter((c) => channels.includes(c)).sort((a, b) => (a === 'height' ? -1 : b === 'height' ? 1 : 0));
     for (const c of ch) {
       const info = channelInfo(c);
@@ -370,20 +437,9 @@ export class SetGPU {
         u.u_vUp!.value = this.vUp ? 1 : 0;
         u.u_flipG!.value = 0;
         u.u_tex!.value = null;
-        const liveMask = active?.layer === l.id && active.keys.includes('mask') ? this.live.get('mask') : null;
-        const mask = l.mask ? liveMask ?? this.target(l.id, 'mask', false) : null;
+        const mask = l.mask ? masks.get(l.id) : null;
         u.u_hasMask!.value = mask ? 1 : 0;
         u.u_mask!.value = mask?.texture ?? null;
-        const gen = l.generator ? GENERATOR_SOURCES.find((x) => x.value === l.generator!.source) : undefined;
-        const gt = gen && this.baked.get(gen.map);
-        u.u_hasGen!.value = gt ? 1 : 0;
-        u.u_gen!.value = gt?.texture ?? null;
-        if (gt && l.generator) {
-          u.u_genCh!.value = gen.map === 'position' || gen.map === 'worldNormal' ? 1 : 0;
-          u.u_genLevel!.value = l.generator.level;
-          u.u_genSpread!.value = l.generator.spread;
-          u.u_genInvert!.value = (l.generator.invert ? 1 : 0) ^ (l.generator.source === 'occlusion' ? 1 : 0);
-        }
         if (l.kind === 'paint') {
           const t = (active?.layer === l.id && active.keys.includes(c) ? this.live.get(c) : null) ?? this.target(l.id, c, false);
           if (!t) continue;
@@ -435,7 +491,8 @@ export class SetGPU {
     this.work?.forEach((t) => t.dispose());
     this.island?.dispose();
     this.stroke?.dispose();
-    for (const t of [...this.baked.values(), ...this.islandsBySize.values()]) t.dispose();
+    for (const t of [...this.baked.values(), ...this.islandsBySize.values(), ...this.maskRts.values()]) t.dispose();
+    this.maskWork?.forEach((t) => t.dispose());
     for (const m of this.fills.values()) for (const t of m.values()) t.dispose();
   }
 }

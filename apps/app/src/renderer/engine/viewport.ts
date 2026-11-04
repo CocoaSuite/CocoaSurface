@@ -4,6 +4,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { findLayer, type Channel } from '@cocoasurface/project';
 import { currentLayer, currentSet, get, push, toast, useApp } from '../store';
 import { engine } from './engine';
+import { cageGeometry, settingsOf } from '../baking';
 import { BAKE_LAYER, hexRgb, type Key, type StrokeOptions } from './gpu';
 
 export type CameraView = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
@@ -17,6 +18,9 @@ export class Viewport {
   private grid = new THREE.GridHelper(4, 20, 0x3a3a3a, 0x2a2a2a);
   private wire = new THREE.Group();
   private wireOf: unknown = null;
+  private cage = new THREE.Group();
+  private cageKey = '';
+  private lightDrag: { x: number; turn: number } | null = null;
   private envTex: THREE.Texture;
   private needs = true;
   private raf = 0;
@@ -39,7 +43,7 @@ export class Viewport {
     this.envTex = pm.fromScene(new RoomEnvironment(), 0.04).texture;
     pm.dispose();
     this.scene.environment = this.envTex;
-    this.scene.add(this.grid, this.wire);
+    this.scene.add(this.grid, this.wire, this.cage);
     this.grid.position.y = -1;
     this.persp.position.set(0, 0.3, 3.4);
     this.ortho.position.copy(this.persp.position);
@@ -58,6 +62,7 @@ export class Viewport {
     this.bindInput();
     this.unsub = useApp.subscribe((s, p) => {
       if (s.view !== p.view || s.project !== p.project || s.setId !== p.setId) this.applyView();
+      if (s.view.cage !== p.view.cage || s.cagePreview !== p.cagePreview || s.project !== p.project || s.setId !== p.setId) this.showCage();
       if (s.brush.size !== p.brush.size) this.cursor.style.width = this.cursor.style.height = `${s.brush.size}px`;
       if (s.tool !== p.tool) this.navButtons(false);
     });
@@ -180,6 +185,29 @@ export class Viewport {
     this.redraw();
   }
 
+  /** The bake cage as a see-through shell with its wires. */
+  showCage(): void {
+    const s = get();
+    const t = currentSet(s);
+    const st = t && (s.cagePreview ?? settingsOf(t));
+    const key = s.view.cage && t && st ? JSON.stringify([t.id, st.useHigh, st.averageNormals, st.cages, st.front, !!engine.high, engine.model?.name]) : '';
+    if (key === this.cageKey) return;
+    this.cageKey = key;
+    for (const c of this.cage.children) {
+      const m = c as THREE.Mesh;
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+    }
+    this.cage.clear();
+    if (key && t && st) {
+      for (const g of cageGeometry(t.id, st)) {
+        this.cage.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xffcd15, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide })));
+        this.cage.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xffcd15, transparent: true, opacity: 0.35, wireframe: true, depthWrite: false })));
+      }
+    }
+    this.redraw();
+  }
+
   private loop = () => {
     this.raf = requestAnimationFrame(this.loop);
     this.flush();
@@ -219,9 +247,11 @@ export class Viewport {
     const b = s.brush;
     const values = new Map<Key, [number, number, number, number]>();
     let key: Key;
-    if (s.maskEdit && l.mask) {
-      key = 'mask';
-      values.set('mask', erase ? [0, 0, 0, 1] : [1, 1, 1, 1]);
+    const item = s.maskItem ? l.mask?.items.find((x) => x.id === s.maskItem) : undefined;
+    if (s.maskItem && item) {
+      if (item.kind !== 'paint') return 'Pick a Paint item in the mask to draw on it.';
+      const v = b.maskValue;
+      return { set: t.id, opts: { key: 'grey', layer: item.id, values: new Map([['grey', [v, v, v, 1]]]), opacity: b.opacity, erase } };
     } else if (l.kind === 'paint') {
       key = 'color';
       for (const c of l.channels) {
@@ -238,7 +268,7 @@ export class Viewport {
         values.set(c, [...v[c]!, 1]);
       }
       if (!values.size) return 'The layer paints none of the texture set’s channels.';
-    } else return l.kind === 'fill' ? 'Fill layers are painted through a mask. Add a mask to the layer first.' : 'Groups can’t be painted.';
+    } else return l.kind === 'fill' ? 'Fill layers show through their mask. Add a black mask and a Paint item to draw where it shows.' : 'Groups can’t be painted.';
     return { set: t.id, opts: { key, layer: l.id, values, opacity: b.opacity, erase } };
   }
 
@@ -281,6 +311,27 @@ export class Viewport {
     window.addEventListener('keydown', (e) => e.key === 'Alt' && this.navButtons(true));
     window.addEventListener('keyup', (e) => e.key === 'Alt' && this.navButtons(false));
     window.addEventListener('blur', () => this.navButtons(false));
+    // Shift and right-drag turns the light around the model.
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 2 || !e.shiftKey) return;
+      e.stopImmediatePropagation();
+      this.controls.enabled = false;
+      el.setPointerCapture(e.pointerId);
+      this.lightDrag = { x: e.clientX, turn: get().view.turn };
+    }, { capture: true });
+    el.addEventListener('pointermove', (e) => {
+      const d = this.lightDrag;
+      if (!d) return;
+      const turn = (((d.turn + (e.clientX - d.x) * 0.5) % 360) + 360) % 360;
+      useApp.setState((s) => ({ view: { ...s.view, turn } }));
+    });
+    const endLight = () => {
+      if (!this.lightDrag) return;
+      this.lightDrag = null;
+      this.controls.enabled = true;
+    };
+    el.addEventListener('pointerup', endLight);
+    el.addEventListener('pointercancel', endLight);
     el.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 || e.altKey || get().tool === 'orbit') return;
       const t = this.strokeTarget();
@@ -315,7 +366,7 @@ export class Viewport {
         for (const k of keys) old.set(k, g.swap(st.opts.layer, k, old.get(k)!)!);
         engine.request(st.set);
       };
-      const l = findLayer(currentSet()?.layers ?? [], st.opts.layer);
+      const l = findLayer(currentSet()?.layers ?? [], st.opts.layer) ?? currentLayer();
       push({ label: st.opts.layer === BAKE_LAYER ? `Paint ${st.opts.key}` : `${get().tool === 'erase' ? 'Erase' : 'Paint'} on ${l?.name ?? 'layer'}`, undo: swapAll, redo: swapAll, drop: () => old.forEach((t) => t.dispose()) });
     };
     el.addEventListener('pointerup', end);
@@ -348,6 +399,6 @@ export class Viewport {
 /** Recomposite what a stroke changes: its channels, everything for a mask, nothing for bake maps. */
 function requestFor(set: string, o: StrokeOptions): void {
   if (o.key === 'skew' || o.key === 'offset') engine.request(set, []);
-  else if (o.key === 'mask') engine.request(set);
-  else engine.request(set, [...o.values.keys()].filter((k): k is Channel => k !== 'mask' && k !== 'skew' && k !== 'offset'));
+  else if (o.key === 'grey') engine.request(set);
+  else engine.request(set, [...o.values.keys()].filter((k): k is Channel => k !== 'grey' && k !== 'skew' && k !== 'offset'));
 }

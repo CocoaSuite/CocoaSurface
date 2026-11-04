@@ -77,3 +77,22 @@ describe('a texture set as a .cocoamat', async () => {
     expect(r.value.manifest.normalGreen).toBe('down');
   });
 });
+
+describe('older projects', () => {
+  it('turn a painted mask and a generator into mask items', async () => {
+    const p = newProject('Old');
+    const set = newTextureSet('A', ['A']);
+    const l = newPaintLayer('P', ['color']) as unknown as Record<string, unknown>;
+    l.mask = true;
+    l.generator = { source: 'curvature', level: 0.5, spread: 0.1, invert: false };
+    set.layers.unshift(l as never);
+    p.textureSets.push(set);
+    const r = await readProject(await writeProject({ project: p, files: new Map([[pixelPath(l.id as string, 'mask'), new Uint8Array([7])]]) }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const m = r.value.project.textureSets[0]!.layers[0]!.mask!;
+    expect(m.base).toBe(1);
+    expect(m.items.map((i) => i.kind)).toEqual(['generator', 'paint']);
+    expect(r.value.files.get(pixelPath(`${l.id}-m`, 'grey'))).toEqual(new Uint8Array([7]));
+  });
+});

@@ -128,10 +128,46 @@ interface LayerBase {
   blend: BlendMode;
   /** The channels this layer changes. */
   channels: Channel[];
-  /** A painted black and white mask (white shows the layer). Its pixels are stored with the project. */
-  mask: boolean;
-  /** Multiplies the mask (or is the mask when there's no painted one). */
-  generator?: Generator | null;
+  /** Where the layer shows: white shows it, black hides it. */
+  mask: Mask | null;
+}
+
+export type MaskBlend = 'normal' | 'multiply' | 'add' | 'subtract' | 'lighten' | 'darken';
+export const MASK_BLENDS: { value: MaskBlend; label: string }[] = [
+  { value: 'normal', label: 'Normal' },
+  { value: 'multiply', label: 'Multiply' },
+  { value: 'add', label: 'Add' },
+  { value: 'subtract', label: 'Subtract' },
+  { value: 'lighten', label: 'Lighten' },
+  { value: 'darken', label: 'Darken' },
+];
+
+/** One step of a mask, like Substance Painter's mask effects. */
+export interface MaskItem {
+  id: string;
+  name: string;
+  /** paint: painted strokes (pixels stored under the item's id); generator: from mesh maps; image: a picture; fill: one grey value. */
+  kind: 'paint' | 'generator' | 'image' | 'fill';
+  visible: boolean;
+  opacity: number;
+  blend: MaskBlend;
+  generator?: Generator;
+  image?: { file: string; name: string; scale: number; invert: boolean };
+  value?: number;
+}
+
+/** A layer's mask: black or white to start with, then its items, top first. */
+export interface Mask {
+  base: 0 | 1;
+  items: MaskItem[];
+}
+
+export function newMaskItem(kind: MaskItem['kind'], extra: Partial<MaskItem> = {}): MaskItem {
+  const names = { paint: 'Paint', generator: 'Generator', image: 'Image', fill: 'Fill' };
+  const it: MaskItem = { id: uid(), name: names[kind], kind, visible: true, opacity: 1, blend: kind === 'generator' ? 'normal' : 'normal', ...extra };
+  if (kind === 'generator' && !it.generator) it.generator = { source: 'curvature', level: 0.6, spread: 0.1, invert: false };
+  if (kind === 'fill' && it.value === undefined) it.value = 1;
+  return it;
 }
 
 export interface PaintLayer extends LayerBase {
@@ -227,7 +263,7 @@ export function newProject(name: string, now = new Date().toISOString()): Projec
   };
 }
 
-const base = (name: string, channels: Channel[]) => ({ id: uid(), name, visible: true, locked: false, opacity: 1, blend: 'normal' as BlendMode, channels: [...channels], mask: false });
+const base = (name: string, channels: Channel[]) => ({ id: uid(), name, visible: true, locked: false, opacity: 1, blend: 'normal' as BlendMode, channels: [...channels], mask: null as Mask | null });
 
 export const newPaintLayer = (name: string, channels: Channel[]): PaintLayer => ({ ...base(name, channels), kind: 'paint' });
 export const newFillLayer = (name: string, channels: Channel[], flat: Partial<FlatValues> = {}): FillLayer => ({

@@ -2,7 +2,7 @@
 // and export the texture set and the fill's material as .cocoamat files that the CocoaWorlds reader accepts.
 // Run with `npm run test:e2e` after `npm run build:renderer`. Needs and a Chromium: set CHROMIUM to its path, or have Playwright's installed.
 import { test } from 'vitest';
-import { evaluable, outputNodes, readCocoaMat } from '@cocoasurface/materials';
+import { encodePng, evaluable, outputNodes, readCocoaMat } from '@cocoasurface/materials';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -130,6 +130,98 @@ test('paint, fill with a material, save, reopen and export', async () => {
       assert.equal(r.ok, true, r.ok ? '' : r.error);
       assert.ok(outputNodes(evaluable(r.value)).size > 0);
     }
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+    srv.close();
+  }
+}, 300_000);
+
+test('masks: black and white, painted, generated and image items', async () => {
+  const model = path.join(tmp, 'ball2.obj');
+  sphere(model);
+  const half = new Uint8Array(64 * 64);
+  for (let i = 0; i < half.length; i++) half[i] = i % 64 < 32 ? 0 : 255;
+  const picture = path.join(tmp, 'half.png');
+  writeFileSync(picture, await encodePng(64, 64, 1, half));
+  const srv = createServer(async (q, r) => {
+    const u = decodeURIComponent(q.url.split('?')[0]);
+    const p = path.join(dist, u === '/' ? 'index.html' : u);
+    try {
+      r.setHeader('content-type', types[path.extname(p)] ?? 'application/octet-stream');
+      r.end(await readFile(p));
+    } catch {
+      r.statusCode = 404;
+      r.end();
+    }
+  }).listen(0);
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const errors = [];
+  try {
+    const pg = await browser.newPage({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+    pg.on('pageerror', (e) => errors.push(e.message));
+    pg.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+    const open = async (trigger, files) => {
+      const fc = pg.waitForEvent('filechooser');
+      await trigger();
+      await (await fc).setFiles(files);
+    };
+    const rough = () =>
+      pg.evaluate(() => {
+        const g = [...window.surface.engine.sets.values()][0];
+        const px = g.p.read(g.display.get('roughness'));
+        let s = 0, s2 = 0;
+        const n = px.length / 4;
+        for (let i = 0; i < px.length; i += 4) (s += px[i]), (s2 += px[i] * px[i]);
+        return { mean: s / n, sd: Math.sqrt(Math.max(0, s2 / n - (s / n) ** 2)) };
+      });
+    await pg.goto(`http://localhost:${srv.address().port}/?inspect`);
+    await open(() => pg.getByText('New project from a model…').first().click(), model);
+    await pg.waitForSelector('canvas.cs-gl');
+    await pg.locator('.cs-side.l select').first().selectOption('512');
+    await pg.getByLabel('New fill layer').click();
+    const r0 = pg.locator('.cs-props .cs-f', { hasText: 'Roughness' }).locator('input.cs-input').last();
+    await r0.fill('0');
+    await r0.press('Enter');
+    await pg.waitForTimeout(500);
+    const shown = await rough();
+    assert.ok(shown.mean < 5, 'with no mask the fill shows everywhere');
+
+    await pg.getByRole('button', { name: 'Add black mask' }).click();
+    await pg.waitForTimeout(500);
+    const hidden = await rough();
+    assert.ok(hidden.mean > 140, 'a black mask hides it');
+
+    const box = await pg.locator('canvas.cs-gl').boundingBox();
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+    await pg.mouse.move(cx - 100, cy);
+    await pg.mouse.down();
+    for (let i = 0; i <= 20; i++) await pg.mouse.move(cx - 100 + i * 10, cy);
+    await pg.mouse.up();
+    await pg.waitForTimeout(500);
+    const drawn = await rough();
+    assert.ok(drawn.mean < hidden.mean && drawn.sd > 5, 'painting white in the mask shows the fill there');
+
+    await pg.locator('.cs-props .cs-chip', { hasText: 'Image' }).click();
+    await open(() => pg.locator('.cs-props .cs-f', { hasText: 'Image' }).getByRole('button').click(), picture);
+    await pg.waitForTimeout(1500);
+    const pictured = await rough();
+    assert.ok(Math.abs(pictured.mean - 153 / 2) < 25, 'an image in the mask shows half the fill');
+
+    await pg.locator('.cs-props').getByRole('radio', { name: 'White', exact: true }).first().click();
+    await pg.waitForTimeout(300);
+
+    const d = pg.waitForEvent('download');
+    await pg.keyboard.press('Control+s');
+    const saved = path.join(tmp, 'masks.cocoasurf');
+    await (await d).saveAs(saved);
+    const before = await rough();
+    await pg.reload();
+    await open(() => pg.getByText('Open…').first().click(), saved);
+    await pg.waitForSelector('canvas.cs-gl');
+    await pg.waitForTimeout(3000);
+    const after = await rough();
+    assert.ok(Math.abs(after.mean - before.mean) < 1, 'the mask comes back with the project');
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

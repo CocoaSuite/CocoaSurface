@@ -1,6 +1,6 @@
 import { readZip, writeZip, type ZipEntry } from '@cocoasurface/materials';
 import { allLayers } from './layers';
-import { CHANNELS, PROJECT_FORMAT, PROJECT_VERSION, TEXTURE_SIZES, type Layer, type Project } from './model';
+import { CHANNELS, newMaskItem, PROJECT_FORMAT, PROJECT_VERSION, TEXTURE_SIZES, type Generator, type Layer, type Project } from './model';
 
 export const PROJECT_MIME = 'application/vnd.cocoasuite.surface+zip';
 export const PROJECT_EXT = 'cocoasurf';
@@ -42,6 +42,28 @@ function checkLayer(l: unknown): string | null {
   return null;
 }
 
+/** Older projects: a painted mask was `mask: true` with `pixels/<layer>/mask.png`, and a generator sat on the layer. */
+function migrate(project: Project, files: Map<string, Uint8Array>): void {
+  for (const set of project.textureSets)
+    for (const l of allLayers(set.layers)) {
+      const old = l as unknown as { mask: unknown; generator?: Generator | null };
+      if (old.mask === true) {
+        const id = `${l.id}-m`;
+        l.mask = { base: 1, items: [newMaskItem('paint', { id })] };
+        const px = files.get(pixelPath(l.id, 'mask'));
+        if (px) {
+          files.delete(pixelPath(l.id, 'mask'));
+          files.set(pixelPath(id, 'grey'), px);
+        }
+      } else if (old.mask === false || old.mask === undefined) l.mask = null;
+      if (old.generator) {
+        l.mask ??= { base: 0, items: [] };
+        l.mask.items.unshift(newMaskItem('generator', { generator: old.generator, blend: l.mask.items.length ? 'multiply' : 'normal' }));
+      }
+      delete old.generator;
+    }
+}
+
 export async function readProject(bytes: Uint8Array): Promise<{ ok: true; value: ProjectFile } | { ok: false; error: string }> {
   const fail = (error: string) => ({ ok: false as const, error });
   const zip = await readZip(bytes);
@@ -72,6 +94,7 @@ export async function readProject(bytes: Uint8Array): Promise<{ ok: true; value:
   const project = p as unknown as Project;
   const files = new Map<string, Uint8Array>();
   for (const [name, data] of zip) if (name !== 'mimetype' && name !== 'project.json') files.set(name, data);
+  migrate(project, files);
   if (project.highPoly && !files.has(project.highPoly.file)) return fail(`The high-poly model “${project.highPoly.name}” is missing from the project.`);
   if (project.model && !files.has(project.model.file)) return fail(`The model “${project.model.name}” is missing from the project.`);
   for (const m of project.library) if (!files.has(m.file)) return fail(`The material “${m.name}” is missing from the project.`);
