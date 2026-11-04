@@ -105,7 +105,7 @@ test('effects on layers, group masks and blends, fill, smudge and blur tools', a
     assert.ok((await rough()).mean < 5, 'the fill shows');
     await chip('Invert');
     assert.ok((await rough()).mean > 250, 'an Invert effect inverts the layer');
-    await field('Strength', 0.5);
+    await field('Strength', 50);
     assert.ok(Math.abs((await rough()).mean - 128) < 6, 'its strength mixes it in');
     await pg.locator('.cs-pane').getByRole('button', { name: 'Delete' }).last().click();
     await pg.waitForTimeout(400);
@@ -113,13 +113,13 @@ test('effects on layers, group masks and blends, fill, smudge and blur tools', a
 
     await chip('Levels');
     await field('Black point', 0);
-    await field('White point', 0.5);
+    await field('White point', 50);
     await toLayer();
-    await field('Roughness', 0.25);
+    await field('Roughness', 25);
     assert.ok(Math.abs((await rough()).mean - 128) < 6, 'Levels stretch the layer');
 
     await chip('Paint');
-    await pg.locator('.cs-props input.cs-input[aria-label="Brush roughness"]').fill('1');
+    await pg.locator('.cs-props input.cs-input[aria-label="Brush roughness"]').fill('100');
     await pg.locator('.cs-props input.cs-input[aria-label="Brush roughness"]').press('Enter');
     const beforePaint = await rough();
     await stroke();
@@ -149,7 +149,7 @@ test('effects on layers, group masks and blends, fill, smudge and blur tools', a
     await pg.locator('.cs-lr', { hasText: 'Base' }).click();
     await pg.getByLabel('New group').click();
     await pg.getByLabel('New fill layer').click();
-    await field('Roughness', 0.5);
+    await field('Roughness', 50);
     assert.ok(Math.abs((await rough()).mean - 128) < 4, 'a fill in a group shows');
     await pg.locator('.cs-lr', { hasText: 'Group 1' }).click();
     await pg.getByRole('button', { name: 'Add black mask' }).click();

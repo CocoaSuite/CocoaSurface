@@ -55,7 +55,18 @@ export interface View {
   turn: number;
   /** Show the bake cage of the current texture set. */
   cage: boolean;
+  /** What lights the model. */
+  env: Environment;
+  /** Show the environment behind the model instead of the plain background. */
+  showEnv: boolean;
 }
+
+export type Environment = 'studio' | 'sunset' | 'day';
+export const ENVIRONMENTS: { value: Environment; label: string }[] = [
+  { value: 'studio', label: 'Studio' },
+  { value: 'sunset', label: 'Sunset' },
+  { value: 'day', label: 'Clear day' },
+];
 
 interface State {
   project: Project | null;
@@ -101,7 +112,7 @@ export const useApp = create<State>(() => ({
   bakePaint: null,
   bakeValue: 1,
   cagePreview: null,
-  view: { mode: 'material', wire: false, ortho: false, grid: true, light: 1, turn: 0, cage: false },
+  view: { mode: 'material', wire: false, ortho: false, grid: true, light: 1, turn: 0, cage: false, env: 'studio', showEnv: false },
   materials: {},
   warnings: [],
   toast: null,

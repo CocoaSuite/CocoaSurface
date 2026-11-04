@@ -1,7 +1,7 @@
 import { Field, PanelHeader, Section } from '@cocoasurface/ui';
 import { CHANNELS, MESH_MAPS, TEXTURE_SIZES, type TextureSize } from '@cocoasurface/project';
 import { Button, Segmented, Switch } from '@cocoasurface/ui';
-import { commit, currentSet, editSet, set, useApp } from '../store';
+import { commit, currentSet, editSet, ENVIRONMENTS, set, useApp, type Environment } from '../store';
 import { Chips, Range } from './controls';
 
 export function TextureSets({ onBake }: { onBake: () => void }) {
@@ -85,6 +85,18 @@ export function TextureSets({ onBake }: { onBake: () => void }) {
             {t.bake?.done.length ? 'Bake again…' : 'Bake mesh maps…'}
           </Button>
           <Section title="Lighting" />
+          <Field label="Light">
+            <select className="cs-select" value={view.env} onChange={(e) => set((s) => ({ view: { ...s.view, env: e.target.value as Environment } }))}>
+              {ENVIRONMENTS.map((x) => (
+                <option key={x.value} value={x.value}>
+                  {x.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Show">
+            <Switch checked={view.showEnv} label="Show the environment" onChange={(v) => set((s) => ({ view: { ...s.view, showEnv: v } }))} />
+          </Field>
           <Field label="Brightness">
             <Range value={view.light} min={0} max={3} label="Brightness" onChange={(v) => set((s) => ({ view: { ...s.view, light: v } }))} onCommit={() => {}} />
           </Field>

@@ -7,7 +7,7 @@ import type { Parameter } from '@cocoasurface/materials';
 import type { LoadedMaterial } from '../engine/library';
 import { exportFillMaterial } from '../io';
 import { commit, currentLayer, currentSet, editSet, set, useApp, type Brush } from '../store';
-import { Chips, Colour, Range } from './controls';
+import { Chips, Color, Range } from './controls';
 import { AssetPicker } from './Assets';
 
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -53,7 +53,7 @@ function Param({ p, m, l }: { p: Parameter; m: LoadedMaterial; l: FillLayer }) {
       );
       break;
     case 'color':
-      control = <Colour value={value as string} label={p.label} onChange={(v) => put(v, true)} onCommit={done} />;
+      control = <Color value={value as string} label={p.label} onChange={(v) => put(v, true)} onCommit={done} />;
       break;
     case 'bool':
       control = <Switch checked={!!value} label={p.label} onChange={(v) => put(v)} />;
@@ -63,7 +63,7 @@ function Param({ p, m, l }: { p: Parameter; m: LoadedMaterial; l: FillLayer }) {
       control = (
         <span className="cs-checks">
           {stops.map((s, i) => (
-            <Colour key={i} value={s.color} label={`${p.label} ${Math.round(s.at * 100)}%`} onChange={(c) => put(stops.map((x, j) => (j === i ? { ...x, color: c } : x)), true)} onCommit={done} />
+            <Color key={i} value={s.color} label={`${p.label} ${Math.round(s.at * 100)}%`} onChange={(c) => put(stops.map((x, j) => (j === i ? { ...x, color: c } : x)), true)} onCommit={done} />
           ))}
         </span>
       );
@@ -85,13 +85,13 @@ function Param({ p, m, l }: { p: Parameter; m: LoadedMaterial; l: FillLayer }) {
   return <Field label={p.label}>{control}</Field>;
 }
 
-const FLAT: { k: keyof FlatValues; c: string; label: string; colour?: boolean }[] = [
-  { k: 'color', c: 'color', label: 'Colour', colour: true },
+const FLAT: { k: keyof FlatValues; c: string; label: string; color?: boolean }[] = [
+  { k: 'color', c: 'color', label: 'Color', color: true },
   { k: 'roughness', c: 'roughness', label: 'Roughness' },
   { k: 'metalness', c: 'metalness', label: 'Metal' },
   { k: 'height', c: 'height', label: 'Height' },
   { k: 'occlusion', c: 'occlusion', label: 'Occlusion' },
-  { k: 'glow', c: 'glow', label: 'Glow', colour: true },
+  { k: 'glow', c: 'glow', label: 'Glow', color: true },
   { k: 'opacity', c: 'opacity', label: 'Opacity' },
 ];
 
@@ -139,8 +139,8 @@ function FillProps({ l }: { l: FillLayer }) {
       ) : null}
       {FLAT.filter((f) => l.channels.includes(f.c as never)).map((f) => (
         <Field key={f.k} label={f.label}>
-          {f.colour ? (
-            <Colour value={l.flat[f.k] as string} label={f.label} onChange={(v) => flat(f.k, v, true)} onCommit={() => commit(`Change ${l.name}`)} />
+          {f.color ? (
+            <Color value={l.flat[f.k] as string} label={f.label} onChange={(v) => flat(f.k, v, true)} onCommit={() => commit(`Change ${l.name}`)} />
           ) : (
             <Range value={l.flat[f.k] as number} min={0} max={1} label={f.label} onChange={(v) => flat(f.k, v, true)} onCommit={() => commit(`Change ${l.name}`)} />
           )}
@@ -324,8 +324,8 @@ function EffectProps({ l, t, w, it }: { l: Layer; t: TextureSet; w: Where; it: E
         it.flat &&
         FLAT.filter((f) => l.channels.includes(f.c as never)).map((f) => (
           <Field key={f.k} label={f.label}>
-            {f.colour ? (
-              <Colour value={it.flat![f.k] as string} label={f.label} onChange={(v) => putItem({ flat: { ...it.flat!, [f.k]: v } }, true)} onCommit={done} />
+            {f.color ? (
+              <Color value={it.flat![f.k] as string} label={f.label} onChange={(v) => putItem({ flat: { ...it.flat!, [f.k]: v } }, true)} onCommit={done} />
             ) : (
               <Range value={it.flat![f.k] as number} min={0} max={1} label={f.label} onChange={(v) => putItem({ flat: { ...it.flat!, [f.k]: v } }, true)} onCommit={done} />
             )}
@@ -448,8 +448,8 @@ function BrushProps({ l }: { l: Layer }) {
     <>
       <Section title="Brush" />
       {has('color') && (
-        <Field label="Colour">
-          <Colour value={b.color} label="Brush colour" onChange={(v) => put('color', v)} onCommit={() => {}} />
+        <Field label="Color">
+          <Color value={b.color} label="Brush color" onChange={(v) => put('color', v)} onCommit={() => {}} />
         </Field>
       )}
       {has('roughness') && (
@@ -469,7 +469,7 @@ function BrushProps({ l }: { l: Layer }) {
       )}
       {has('glow') && (
         <Field label="Glow">
-          <Colour value={b.glow} label="Brush glow" onChange={(v) => put('glow', v)} onCommit={() => {}} />
+          <Color value={b.glow} label="Brush glow" onChange={(v) => put('glow', v)} onCommit={() => {}} />
         </Field>
       )}
     </>

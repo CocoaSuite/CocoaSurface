@@ -8,7 +8,7 @@ export interface ChannelInfo {
 }
 
 export const CHANNELS: ChannelInfo[] = [
-  { id: 'color', label: 'Base colour', kind: 'color' },
+  { id: 'color', label: 'Base color', kind: 'color' },
   { id: 'roughness', label: 'Roughness', kind: 'grey' },
   { id: 'metalness', label: 'Metal', kind: 'grey' },
   { id: 'normal', label: 'Normal', kind: 'normal' },

@@ -23,6 +23,9 @@ export class Viewport {
   private cageKey = '';
   private lightDrag: { x: number; turn: number } | null = null;
   private envTex: THREE.Texture;
+  private pm: THREE.PMREMGenerator;
+  private envs = new Map<string, { light: THREE.Texture; sky: THREE.Texture | null }>();
+  private envLoading = new Set<string>();
   private needs = true;
   private raf = 0;
   private ro: ResizeObserver;
@@ -42,9 +45,9 @@ export class Viewport {
     this.r.setClearColor(0x1b1b1b, 1);
     host.appendChild(this.r.domElement);
     this.r.domElement.className = 'cs-gl';
-    const pm = new THREE.PMREMGenerator(this.r);
-    this.envTex = pm.fromScene(new RoomEnvironment(), 0.04).texture;
-    pm.dispose();
+    this.pm = new THREE.PMREMGenerator(this.r);
+    this.envTex = this.pm.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.envs.set('studio', { light: this.envTex, sky: null });
     this.scene.environment = this.envTex;
     this.scene.add(this.grid, this.wire, this.cage);
     this.grid.position.y = -1;
@@ -165,6 +168,13 @@ export class Viewport {
     this.grid.visible = v.grid;
     this.scene.environmentIntensity = v.light;
     this.scene.environmentRotation.set(0, THREE.MathUtils.degToRad(v.turn), 0);
+    this.scene.backgroundRotation.copy(this.scene.environmentRotation);
+    const env = this.environment(v.env);
+    if (env) this.scene.environment = env.light;
+    // The skies are ordinary pictures, not HDR, so they need more strength to light like the studio.
+    this.scene.environmentIntensity = v.light * (env?.sky ? 1.8 : 1);
+    this.scene.background = v.showEnv && env ? (env.sky ?? env.light) : null;
+    this.scene.backgroundBlurriness = env && !env.sky ? 0.5 : 0;
     const m = engine.model;
     if (!v.wire || this.wireOf !== m) {
       for (const c of this.wire.children) (c as THREE.LineSegments).geometry.dispose();
@@ -186,6 +196,21 @@ export class Viewport {
       if (v.wire) this.wireOf = m;
     }
     this.redraw();
+  }
+
+  /** An environment's lighting and sky, loaded the first time it's used. */
+  private environment(id: string): { light: THREE.Texture; sky: THREE.Texture | null } | null {
+    const e = this.envs.get(id);
+    if (e || this.envLoading.has(id)) return e ?? null;
+    this.envLoading.add(id);
+    new THREE.TextureLoader().load(`./env/${id}.jpg`, (sky) => {
+      sky.mapping = THREE.EquirectangularReflectionMapping;
+      sky.colorSpace = THREE.SRGBColorSpace;
+      this.envs.set(id, { light: this.pm.fromEquirectangular(sky).texture, sky });
+      this.envLoading.delete(id);
+      this.applyView();
+    });
+    return null;
   }
 
   /** The bake cage as a see-through shell with its wires. */

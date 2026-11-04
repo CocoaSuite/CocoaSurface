@@ -52,7 +52,7 @@ export function BakeDialog({ onClose }: { onClose: () => void }) {
               </Field>
             </>
           )}
-          {st.maps.includes('id') && <Field label="ID colours">{select(st.idFrom, [['material', 'By material'], ['mesh', 'By mesh']], (v) => put('idFrom', v as BakeSettings['idFrom']))}</Field>}
+          {st.maps.includes('id') && <Field label="ID colors">{select(st.idFrom, [['material', 'By material'], ['mesh', 'By mesh']], (v) => put('idFrom', v as BakeSettings['idFrom']))}</Field>}
           <div className="cs-sec">
             <span>Bevel shader</span>
             {bevel ? (

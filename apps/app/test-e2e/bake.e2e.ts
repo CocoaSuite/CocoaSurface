@@ -122,11 +122,12 @@ test('bake from a high-poly model, drive a mask with the maps, save and reopen',
     const masked = await mapStats('display', 'roughness');
     assert.ok(masked.sd > 1, 'the edge mask shows the fill on part of the model only');
     const noise = pg.locator('.cs-props input.cs-input[aria-label="Noise"]');
-    await noise.fill('1');
+    await noise.fill('100');
     await noise.press('Enter');
     await pg.waitForTimeout(1000);
     const noisy = await mapStats('display', 'roughness');
     assert.ok(Math.abs(noisy.mean - masked.mean) > 0.5 || Math.abs(noisy.sd - masked.sd) > 0.5, 'noise breaks up the generated edge');
+    assert.ok(noisy.mean >= masked.mean, 'noise only takes away from the mask (less of the fill shows)');
     await pg.locator('.cs-props .cs-f', { hasText: 'Noise type' }).locator('select').selectOption('cells');
     await pg.waitForTimeout(1000);
     const cells = await mapStats('display', 'roughness');

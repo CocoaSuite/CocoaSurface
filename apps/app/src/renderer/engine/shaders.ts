@@ -75,7 +75,7 @@ float picture(vec3 p, vec2 uv) {
   w /= w.x + w.y + w.z + 1e-5;
   return texture(u_noiseTex, p.yz).r * w.x + texture(u_noiseTex, p.xz).r * w.y + texture(u_noiseTex, p.xy).r * w.z;
 }
-// Breaks up a generator's edge. Seamless on the model when the position map is baked.
+// How much to take away from a generator, so noise only wears its shapes down. Seamless when the position map is baked.
 float grain(vec2 uv) {
   if (u_noise <= 0.) return 0.;
   vec3 p = (u_hasPos == 1 ? texture(u_pos, uv).rgb : vec3(uv, 0.)) * 8. / max(u_noiseScale, .01);
@@ -91,7 +91,7 @@ float grain(vec2 uv) {
     for (int i = 0; i < 4; i++) { n += vnoise(p) * a; p *= 2.03; a *= .5; }
     n /= .9375;
   }
-  return (n - .5) * 2. * u_noise;
+  return n * u_noise;
 }`;
 
 /** One layer over what's below it, for one channel. 8 is an internal blend: replace (groups passing through). */
@@ -206,7 +206,7 @@ void main() {
     vec4 g = texture(u_tex, vUv);
     float v = u_ch == 1 ? g.g : g.r;
     if (u_invert == 1) v = 1. - v;
-    v += grain(vUv);
+    v -= grain(vUv);
     s = vec3(smoothstep(u_level - u_spread, u_level + u_spread + 1e-4, v));
   } else if (u_src == 4) {
     vec2 st = vUv * u_scale;
@@ -473,7 +473,7 @@ void main() {
     vec4 g = texture(u_tex, vUv);
     float v = u_ch == 1 ? g.g : g.r;
     if (u_invert == 1) v = 1. - v;
-    v += grain(vUv);
+    v -= grain(vUv);
     s = smoothstep(u_level - u_spread, u_level + u_spread + 1e-4, v);
   } else if (u_src == 3) {
     vec2 st = vUv * u_scale;
