@@ -2,7 +2,7 @@ import { Button, Field, IconButton, NumberField, PanelHeader, Section, Segmented
 import { engine } from '../engine/engine';
 import { host } from '../host';
 import { MASK_ROOT, setMask } from './Layers';
-import { BLEND_MODES, CHANNELS, EFFECT_KINDS, GENERATOR_SOURCES, MASK_BLENDS, newLayerEffect, newMaskItem, uid, updateLayer, type BlendMode, type Effect, type EffectKind, type FillLayer, type FlatValues, type Generator, type Layer, type TextureSet } from '@cocoasurface/project';
+import { BLEND_MODES, CHANNELS, EFFECT_KINDS, GENERATOR_SOURCES, NOISE_LABELS, NOISE_TYPES, type NoiseType, MASK_BLENDS, newLayerEffect, newMaskItem, uid, updateLayer, type BlendMode, type Effect, type EffectKind, type FillLayer, type FlatValues, type Generator, type Layer, type TextureSet } from '@cocoasurface/project';
 import type { Parameter } from '@cocoasurface/materials';
 import type { LoadedMaterial } from '../engine/library';
 import { exportFillMaterial } from '../io';
@@ -191,6 +191,13 @@ function EffectProps({ l, t, w, it }: { l: Layer; t: TextureSet; w: Where; it: E
     await engine.addImage(file, f.bytes);
     putItem({ image: { file, name: f.name, scale: it.image?.scale ?? 1, invert: it.image?.invert ?? false }, name: f.name.replace(/\.[^.]+$/, '') });
   };
+  const pickNoise = async () => {
+    const [f] = await host.open([{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]);
+    if (!f) return;
+    const file = `masks/${uid()}.${f.name.split('.').pop()!.toLowerCase()}`;
+    await engine.addImage(file, f.bytes);
+    putItem({ generator: { ...it.generator!, noiseImage: { file, name: f.name } } });
+  };
   const src = it.generator && GENERATOR_SOURCES.find((x) => x.value === it.generator!.source)!;
   const range = (label: string, value: number, min: number, max: number, f: (v: number) => Partial<Effect>, step?: number) => (
     <Field label={label}>
@@ -258,6 +265,22 @@ function EffectProps({ l, t, w, it }: { l: Layer; t: TextureSet; w: Where; it: E
           {range('Noise', it.generator.noise ?? 0, 0, 1, (v) => ({ generator: { ...it.generator!, noise: v } }))}
           {(it.generator.noise ?? 0) > 0 && (
             <>
+              <Field label="Noise type">
+                <select className="cs-select" value={it.generator.noiseType ?? 'clouds'} onChange={(e) => putItem({ generator: { ...it.generator!, noiseType: e.target.value as NoiseType } })}>
+                  {NOISE_TYPES.map((n) => (
+                    <option key={n} value={n}>
+                      {NOISE_LABELS[n]}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {it.generator.noiseType === 'image' && (
+                <Field label="Noise picture">
+                  <Button size="sm" onClick={() => void pickNoise()}>
+                    {it.generator.noiseImage?.name ?? 'Choose…'}
+                  </Button>
+                </Field>
+              )}
               {range('Noise size', it.generator.noiseScale ?? 1, 0.1, 4, (v) => ({ generator: { ...it.generator!, noiseScale: v } }), 0.05)}
               <Field label="Seed">
                 <span className="cs-range">

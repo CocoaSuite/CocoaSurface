@@ -105,7 +105,14 @@ export interface Generator {
   noise?: number;
   noiseScale?: number;
   seed?: number;
+  noiseType?: NoiseType;
+  /** Picture used when the noise type is 'image' (inside the project). */
+  noiseImage?: { file: string; name: string };
 }
+
+export type NoiseType = 'clouds' | 'cells' | 'grain' | 'scratches' | 'image';
+export const NOISE_TYPES: NoiseType[] = ['clouds', 'cells', 'grain', 'scratches', 'image'];
+export const NOISE_LABELS: Record<NoiseType, string> = { clouds: 'Clouds', cells: 'Cells', grain: 'Grain', scratches: 'Scratches', image: 'Picture' };
 
 export const GENERATOR_SOURCES: { value: Generator['source']; label: string; map: MeshMap }[] = [
   { value: 'curvature', label: 'Edges (curvature)', map: 'curvature' },

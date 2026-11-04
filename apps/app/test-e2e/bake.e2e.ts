@@ -127,6 +127,10 @@ test('bake from a high-poly model, drive a mask with the maps, save and reopen',
     await pg.waitForTimeout(1000);
     const noisy = await mapStats('display', 'roughness');
     assert.ok(Math.abs(noisy.mean - masked.mean) > 0.5 || Math.abs(noisy.sd - masked.sd) > 0.5, 'noise breaks up the generated edge');
+    await pg.locator('.cs-props .cs-f', { hasText: 'Noise type' }).locator('select').selectOption('cells');
+    await pg.waitForTimeout(1000);
+    const cells = await mapStats('display', 'roughness');
+    assert.ok(Math.abs(cells.mean - noisy.mean) > 0.2 || Math.abs(cells.sd - noisy.sd) > 0.2, 'another noise type changes the edge');
 
     const d = pg.waitForEvent('download');
     await pg.keyboard.press('Control+s');

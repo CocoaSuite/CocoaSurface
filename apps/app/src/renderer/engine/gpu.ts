@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
-import { BLEND_MODES, GENERATOR_SOURCES, MASK_BLENDS, type Effect, type FlatValues, type Mask, channelInfo, type Channel, type FillLayer, type Layer, type TextureSet } from '@cocoasurface/project';
+import { BLEND_MODES, GENERATOR_SOURCES, MASK_BLENDS, NOISE_TYPES, type Effect, type FlatValues, type Mask, channelInfo, type Channel, type FillLayer, type Layer, type TextureSet } from '@cocoasurface/project';
 import type { Part } from './model';
 import type { RoleTextures } from './library';
 import { COMMIT_FS, COPY_FS, DAB_FS, DIST_FS, DIST_VS, EFFECT_FS, FILL_FS, FINAL_FS, ISLAND_FS, ISLAND_VS, LAYER_FS, MASK_FS, MAX_DABS, PICK_FS, QUAD_VS, SMEAR_FS, UV_VS } from './shaders';
@@ -50,11 +50,11 @@ export class Passes {
   readonly commit = shader(COMMIT_FS, { u_dst: { value: null }, u_stroke: { value: null }, u_value: { value: new THREE.Vector4() }, u_opacity: { value: 1 }, u_erase: { value: 0 } });
   readonly mask = shader(MASK_FS, {
     u_below: { value: null }, u_tex: { value: null }, u_src: { value: 0 }, u_blend: { value: 0 }, u_ch: { value: 0 }, u_invert: { value: 0 }, u_vUp: { value: 0 },
-    u_value: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_scale: { value: 1 }, u_radius: { value: 0 }, u_noise: { value: 0 }, u_noiseScale: { value: 1 }, u_seed: { value: 0 }, u_pos: { value: null }, u_hasPos: { value: 0 }, u_levels: { value: new THREE.Vector3(0, 1, 1) },
+    u_value: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_scale: { value: 1 }, u_radius: { value: 0 }, u_noise: { value: 0 }, u_noiseScale: { value: 1 }, u_seed: { value: 0 }, u_pos: { value: null }, u_hasPos: { value: 0 }, u_noiseType: { value: 0 }, u_noiseTex: { value: null }, u_nrm: { value: null }, u_hasNrm: { value: 0 }, u_levels: { value: new THREE.Vector3(0, 1, 1) },
   });
   readonly effect = shader(EFFECT_FS, {
     u_below: { value: null }, u_tex: { value: null }, u_src: { value: 0 }, u_kind: { value: 0 }, u_blend: { value: 0 }, u_vUp: { value: 0 }, u_flipG: { value: 0 }, u_ch: { value: 0 }, u_invert: { value: 0 },
-    u_value: { value: new THREE.Vector3() }, u_levels: { value: new THREE.Vector3(0, 1, 1) }, u_hsl: { value: new THREE.Vector3() }, u_scale: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_radius: { value: 0 }, u_noise: { value: 0 }, u_noiseScale: { value: 1 }, u_seed: { value: 0 }, u_pos: { value: null }, u_hasPos: { value: 0 },
+    u_value: { value: new THREE.Vector3() }, u_levels: { value: new THREE.Vector3(0, 1, 1) }, u_hsl: { value: new THREE.Vector3() }, u_scale: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_radius: { value: 0 }, u_noise: { value: 0 }, u_noiseScale: { value: 1 }, u_seed: { value: 0 }, u_pos: { value: null }, u_hasPos: { value: 0 }, u_noiseType: { value: 0 }, u_noiseTex: { value: null }, u_nrm: { value: null }, u_hasNrm: { value: 0 },
   });
   readonly smear = shader(SMEAR_FS, { u_dst: { value: null }, u_stroke: { value: null }, u_mode: { value: 0 }, u_radius: { value: 0 }, u_offset: { value: new THREE.Vector2() }, u_opacity: { value: 1 } });
   readonly pick = shader(PICK_FS, { u_island: { value: -1 } }, ISLAND_VS, { side: THREE.DoubleSide });
@@ -440,7 +440,7 @@ export class SetGPU {
         u.u_ch!.value = src.map === 'position' || src.map === 'worldNormal' ? 1 : 0;
         u.u_level!.value = g.level;
         u.u_spread!.value = g.spread;
-        this.noiseOf(u, g);
+        this.noiseOf(u, g, image);
         u.u_invert!.value = (g.invert ? 1 : 0) ^ (g.source === 'occlusion' ? 1 : 0);
       } else if (it.kind === 'image' && it.image) {
         const t = image(it.image.file);
@@ -472,8 +472,13 @@ export class SetGPU {
     return out;
   }
 
-  private noiseOf(u: Record<string, THREE.IUniform>, g: import('@cocoasurface/project').Generator): void {
-    const pos = this.baked.get('position');
+  private noiseOf(u: Record<string, THREE.IUniform>, g: import('@cocoasurface/project').Generator, image: (file: string) => THREE.Texture | null): void {
+    const pos = this.baked.get('position'), nrm = this.baked.get('worldNormal');
+    const pic = g.noiseType === 'image' && g.noiseImage ? image(g.noiseImage.file) : null;
+    u.u_noiseType!.value = pic ? 4 : Math.max(0, NOISE_TYPES.indexOf(g.noiseType ?? 'clouds'));
+    u.u_noiseTex!.value = pic;
+    u.u_nrm!.value = nrm?.texture ?? null;
+    u.u_hasNrm!.value = nrm ? 1 : 0;
     u.u_noise!.value = g.noise ?? 0;
     u.u_noiseScale!.value = g.noiseScale ?? 1;
     u.u_seed!.value = g.seed ?? 0;
@@ -667,7 +672,7 @@ export class SetGPU {
         u.u_ch!.value = s.map === 'position' || s.map === 'worldNormal' ? 1 : 0;
         u.u_level!.value = g.level;
         u.u_spread!.value = g.spread;
-        this.noiseOf(u, g);
+        this.noiseOf(u, g, ctx.image);
         u.u_invert!.value = (g.invert ? 1 : 0) ^ (g.source === 'occlusion' ? 1 : 0);
       } else if (e.kind === 'image' && e.image) {
         const t = ctx.image(e.image.file);

@@ -54,13 +54,44 @@ float vnoise(vec3 p) {
   return mix(mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), f.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), f.x), f.y),
              mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), f.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), f.x), f.y), f.z);
 }
+uniform int u_noiseType;   // 0 clouds, 1 cells, 2 grain, 3 scratches, 4 picture
+uniform sampler2D u_noiseTex;
+uniform sampler2D u_nrm;
+uniform int u_hasNrm;
+float cells(vec3 p) {
+  vec3 i = floor(p), f = fract(p);
+  float d = 1.;
+  for (int z = -1; z <= 1; z++) for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec3 o = vec3(x, y, z);
+    vec3 h = vec3(hash3(i + o), hash3(i + o + 7.1), hash3(i + o + 13.7));
+    d = min(d, length(o + h - f));
+  }
+  return clamp(d, 0., 1.);
+}
+float picture(vec3 p, vec2 uv) {
+  if (u_hasPos == 0) return texture(u_noiseTex, uv * 8. / max(u_noiseScale, .01)).r;
+  vec3 w = u_hasNrm == 1 ? abs(texture(u_nrm, uv).rgb * 2. - 1.) : vec3(1.);
+  w = pow(w, vec3(4.));
+  w /= w.x + w.y + w.z + 1e-5;
+  return texture(u_noiseTex, p.yz).r * w.x + texture(u_noiseTex, p.xz).r * w.y + texture(u_noiseTex, p.xy).r * w.z;
+}
 // Breaks up a generator's edge. Seamless on the model when the position map is baked.
 float grain(vec2 uv) {
   if (u_noise <= 0.) return 0.;
   vec3 p = (u_hasPos == 1 ? texture(u_pos, uv).rgb : vec3(uv, 0.)) * 8. / max(u_noiseScale, .01);
-  float n = 0., a = .5;
-  for (int i = 0; i < 4; i++) { n += vnoise(p) * a; p *= 2.03; a *= .5; }
-  return (n / .9375 - .5) * 2. * u_noise;
+  float n = 0.;
+  if (u_noiseType == 1) n = cells(p);
+  else if (u_noiseType == 2) n = hash3(floor(p * 16.));
+  else if (u_noiseType == 3) {
+    vec3 q = p * vec3(1., 12., 1.);
+    n = smoothstep(.55, .75, vnoise(q)) * .7 + vnoise(q * 2.1) * .3;
+  } else if (u_noiseType == 4) n = picture(p, uv);
+  else {
+    float a = .5;
+    for (int i = 0; i < 4; i++) { n += vnoise(p) * a; p *= 2.03; a *= .5; }
+    n /= .9375;
+  }
+  return (n - .5) * 2. * u_noise;
 }`;
 
 /** One layer over what's below it, for one channel. 8 is an internal blend: replace (groups passing through). */

@@ -102,7 +102,7 @@ async function load(bytes: Uint8Array, path: string | null): Promise<void> {
   for (const t of project.textureSets)
     for (const l of allLayers(t.layers))
       for (const m of [...(l.mask?.items ?? []), ...(l.effects ?? [])])
-        if (m.image && files.has(m.image.file)) await engine.addImage(m.image.file, files.get(m.image.file)!);
+        for (const file of [m.image?.file, m.generator?.noiseImage?.file]) if (file && files.has(file)) await engine.addImage(file, files.get(file)!);
   start(project, path, materials, warnings);
   await engine.ready();
   for (const t of project.textureSets) {
