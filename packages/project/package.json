@@ -1,0 +1,9 @@
+{
+  "name": "@cocoasurface/project",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The CocoaSurface project model: texture sets, layer stacks, library materials, and the .cocoasurf file.",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@cocoasurface/materials": "^0.1.0" }
+}

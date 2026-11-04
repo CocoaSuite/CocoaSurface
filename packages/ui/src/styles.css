@@ -1,0 +1,217 @@
+/*
+ * CocoaSurface UI — tokens and base styles carried over from CocoaCanvas (editor.html).
+ * Values marked "CC" are copied unchanged. See DESIGN_SYSTEM.md before changing anything here.
+ */
+:root {
+  /* CC */
+  --bg: #121212;
+  --panel: #1a1a1a;
+  --panel2: #252525;
+  --line: #303030;
+  --fg: #ececec;
+  --mute: #8f8f8f;
+  --pri: #f2f2f2;
+  --prifg: #111;
+  --acc: #4a4a4a;
+  --accfg: #ffffff;
+  --hl: #ffffff;
+  --bad: #ff8a73;
+  --sel: #4b9cff;
+  --guide: #ff5b8a;
+  --cbg: #1f1f1f;
+  --rowsel: #2d3a4d;
+  --menuhover: #363636;
+  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* CocoaSurface */
+  --cs-brand: #ffcd15;
+  --cs-brand-hi: #ffdb5c;
+  --cs-warn: #f0a442;
+  --cs-x: #ff6b5b;
+  --cs-y: #8fd14f;
+  --cs-z: #4b9cff;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.4 var(--sans);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+input, textarea, [contenteditable] { user-select: text; -webkit-user-select: text; }
+button, input, select, textarea { font: inherit; color: inherit; }
+
+/* Buttons — CC */
+.cs-btn {
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cs-btn:hover { border-color: var(--mute); }
+.cs-btn:disabled { opacity: 0.45; cursor: default; }
+.cs-btn:disabled:hover { border-color: var(--line); }
+.cs-btn.pri { background: var(--pri); border-color: var(--pri); color: var(--prifg); font-weight: 600; }
+.cs-btn.pri:hover { background: #fff; border-color: #fff; }
+.cs-btn.ghost { background: none; border-color: transparent; color: var(--mute); }
+.cs-btn.ghost:hover { color: var(--fg); background: var(--panel2); }
+.cs-btn.sm { padding: 3px 9px; font-size: 12px; }
+:is(button, input, select, textarea):focus-visible { outline: 2px solid var(--hl); outline-offset: 1px; }
+
+.cs-ic { display: inline-grid; place-items: center; padding: 5px 8px; }
+.cs-ic svg, .cs-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* Fields — CC */
+.cs-input, .cs-select {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 4px 6px;
+  min-width: 0;
+  width: 100%;
+}
+.cs-input.mono { font: 12px var(--mono); }
+.cs-nf { position: relative; display: block; min-width: 0; }
+.cs-nf > span {
+  position: absolute; left: 3px; top: 50%; transform: translateY(-50%);
+  color: var(--mute); font-size: 11px; padding: 4px; cursor: ew-resize; touch-action: none;
+}
+.cs-nf > span:hover { color: var(--fg); }
+.cs-nf > input { padding-left: 20px; font: 12px var(--mono); }
+.cs-nf.x > span { color: var(--cs-x); }
+.cs-nf.y > span { color: var(--cs-y); }
+.cs-nf.z > span { color: var(--cs-z); }
+
+/* Top bar and menus — CC */
+.cs-top {
+  display: flex; align-items: center; gap: 6px; padding: 0 10px; min-height: 38px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.cs-menus { display: flex; align-items: center; margin-left: 8px; }
+.cs-mn { position: relative; }
+.cs-mt { background: none; border: 0; border-radius: 4px; padding: 4px 9px; cursor: pointer; }
+.cs-mt:hover, .cs-mn.on .cs-mt { background: var(--panel2); }
+.cs-dd, .cs-ctx {
+  display: flex; flex-direction: column; z-index: 40; min-width: 210px;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 7px; padding: 4px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+.cs-dd { position: absolute; left: 0; top: calc(100% + 4px); }
+.cs-ctx { position: fixed; z-index: 80; max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain; }
+.cs-dd button, .cs-ctx button {
+  background: none; border: 0; border-radius: 4px; text-align: left; padding: 6px 10px; cursor: pointer;
+  display: flex; align-items: center; gap: 16px;
+}
+.cs-dd button:hover:not(:disabled), .cs-ctx button:hover:not(:disabled) { background: var(--menuhover); }
+.cs-dd button:disabled, .cs-ctx button:disabled { opacity: 0.45; cursor: default; }
+.cs-dd button kbd, .cs-ctx button kbd { margin-left: auto; color: var(--mute); background: none; border: 0; padding: 0; font: 12px var(--mono); }
+.cs-dd hr, .cs-ctx hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; width: auto; }
+.cs-vs { width: 1px; height: 20px; background: var(--line); margin: 0 6px; flex: none; }
+.cs-sp { flex: 1; }
+
+/* Panels — CC */
+.cs-ph {
+  display: flex; align-items: center; justify-content: space-between; padding: 10px 12px;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--mute);
+}
+.cs-ph .cs-btn { text-transform: none; letter-spacing: 0; font-size: 12px; padding: 3px 9px; color: var(--fg); }
+.cs-sec {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--mute);
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.cs-sec:first-child { margin-top: 0; border-top: 0; padding-top: 0; }
+.cs-f { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; align-items: center; }
+.cs-f > span:first-child { color: var(--mute); }
+.cs-f3 { display: grid; grid-template-columns: 72px repeat(3, minmax(0, 1fr)); gap: 6px; align-items: center; }
+.cs-f3 > span:first-child { color: var(--mute); }
+.cs-empty { color: var(--mute); padding: 10px 8px; line-height: 1.5; }
+
+/* Tree rows — CC (.lr) */
+.cs-lr {
+  display: flex; align-items: center; gap: 5px; height: 28px; padding-right: 4px; border-radius: 5px;
+  cursor: default;
+}
+.cs-lr:hover { background: var(--panel2); }
+.cs-lr.on { background: var(--rowsel); }
+.cs-lr.off .cs-ln, .cs-lr.off .cs-ls { opacity: 0.45; }
+.cs-lr .cs-cx { width: 14px; height: 14px; flex: none; display: grid; place-items: center; color: var(--mute); background: none; border: 0; padding: 0; }
+.cs-lr .cs-cx::before { content: ''; border: 4px solid transparent; border-left: 5px solid currentColor; border-right: 0; transform: translateX(2px); }
+.cs-lr .cs-cx.o::before { transform: rotate(90deg) translateX(2px); }
+.cs-ls { flex: none; color: var(--mute); display: grid; }
+.cs-ls svg { width: 13px; height: 13px; stroke-width: 1.8; }
+.cs-lr.on .cs-ls { color: var(--fg); }
+.cs-ln { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-ln input { height: 22px; padding: 1px 4px; }
+.cs-lb { background: none; border: 0; padding: 2px; color: var(--mute); display: none; cursor: pointer; }
+.cs-lb svg { width: 14px; height: 14px; stroke-width: 1.8; display: block; }
+.cs-lr:hover .cs-lb, .cs-lb.set { display: block; }
+.cs-lb:hover { color: var(--fg); }
+
+/* Segmented — CC (.seg) */
+.cs-seg { display: flex; gap: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
+.cs-seg button { background: none; border: 1px solid transparent; border-radius: 5px; padding: 3px 9px; color: var(--mute); font-size: 12px; cursor: pointer; }
+.cs-seg button:hover { color: var(--fg); }
+.cs-seg button.on { background: var(--panel2); border-color: var(--line); color: var(--fg); }
+
+/* Switch — CC (.sw2), brand yellow */
+.cs-sw { position: relative; width: 42px; height: 24px; flex: none; display: inline-block; }
+.cs-sw input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.cs-sw i { position: absolute; inset: 0; border-radius: 12px; background: var(--panel2); border: 1px solid var(--line); transition: 0.15s; pointer-events: none; }
+.cs-sw i::after { content: ''; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--mute); transition: 0.15s; }
+.cs-sw input:checked + i { background: var(--cs-brand); border-color: var(--cs-brand); }
+.cs-sw input:checked + i::after { left: 21px; background: #111; }
+.cs-sw input:focus-visible + i { outline: 2px solid var(--hl); outline-offset: 1px; }
+
+/* Tool bar — CC (#tbar) */
+.cs-tbar { display: flex; justify-content: center; align-items: center; gap: 4px; padding: 6px 10px; background: var(--panel); border-top: 1px solid var(--line); }
+.cs-tool { width: 34px; height: 30px; padding: 0; display: grid; place-items: center; background: none; border: 1px solid transparent; border-radius: 6px; cursor: pointer; }
+.cs-tool:hover { background: var(--panel2); }
+.cs-tool.on { background: var(--pri); color: var(--prifg); border-color: var(--pri); }
+.cs-tool:disabled { opacity: 0.35; cursor: default; background: none; }
+
+/* Dialog — CC (.modal) */
+.cs-modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: grid; place-items: center; z-index: 75; padding: 48px; }
+.cs-box {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px;
+  width: min(420px, 100%); display: flex; flex-direction: column; gap: 12px;
+  max-height: calc(100vh - 32px); overflow: auto; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.cs-box h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.cs-box p { margin: 0; color: var(--mute); line-height: 1.5; }
+.cs-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+/* Toast — CC */
+.cs-toast {
+  position: fixed; left: 50%; bottom: 60px; transform: translateX(-50%); z-index: 86;
+  background: var(--panel2); border: 1px solid var(--line); padding: 8px 14px; border-radius: 8px;
+  opacity: 0; transition: opacity 0.2s; pointer-events: none;
+}
+.cs-toast.on { opacity: 1; }
+
+kbd { font: 12px var(--mono); background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+
+.cs-scroll { overflow: auto; min-height: 0; }
+.cs-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.cs-scroll::-webkit-scrollbar-thumb { background: #333; border-radius: 5px; border: 2px solid var(--panel); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cs-toast, .cs-sw i, .cs-sw i::after { transition: none; }
+}
+
+/* Colour field (CocoaCanvas .cr) */
+.cs-color { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.cs-color input[type='color'] { width: 22px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: none; cursor: pointer; }
+.cs-color input[type='color']::-webkit-color-swatch-wrapper { padding: 0; }
+.cs-color input[type='color']::-webkit-color-swatch { border: 0; border-radius: 4px; }

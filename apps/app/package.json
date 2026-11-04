@@ -1,0 +1,35 @@
+{
+  "name": "@cocoasurface/app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CocoaSurface desktop application",
+  "main": "dist/main/main.cjs",
+  "scripts": {
+    "build:main": "node scripts/build-main.mjs",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:renderer",
+    "start": "electron .",
+    "dev": "node scripts/dev.mjs",
+    "web": "vite",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+  },
+  "dependencies": {
+    "@cocoasurface/materials": "^0.1.0",
+    "@cocoasurface/project": "^0.1.0",
+    "@cocoasurface/ui": "^0.1.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "three": "^0.187.0",
+    "zustand": "^5.0.16"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.187.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^45.2.1",
+    "esbuild": "^0.28.2",
+    "vite": "^8.3.5",
+    "playwright-core": "^1.64.1"
+  }
+}

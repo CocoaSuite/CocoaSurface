@@ -1,0 +1,22 @@
+{
+  "name": "cocoasurface",
+  "private": true,
+  "version": "0.1.0",
+  "description": "CocoaSurface: 3D texture painting and material authoring",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "dev": "npm run dev -w @cocoasurface/app",
+    "build": "npm run build -w @cocoasurface/app",
+    "start": "npm run start -w @cocoasurface/app",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "sync-materials": "node tools/sync-materials.mjs"
+  },
+  "engines": { "node": ">=22" },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "type": "module"
+}

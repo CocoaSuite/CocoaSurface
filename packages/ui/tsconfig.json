@@ -1,0 +1,1 @@
+{ "extends": "../../tsconfig.base.json", "compilerOptions": { "outDir": "../../node_modules/.tsc/ui", "types": [] }, "include": ["src"] }

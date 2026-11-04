@@ -1,0 +1,8 @@
+{
+  "name": "@cocoasurface/materials",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cocoa Materials graph, nodes, shaders, GPU evaluator and .cocoamat reader/writer (shared with CocoaWorlds).",
+  "exports": { ".": "./src/index.ts" }
+}

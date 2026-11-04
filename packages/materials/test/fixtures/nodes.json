@@ -1,0 +1,5052 @@
+{
+  "format": "cocoasuite.material-nodes",
+  "version": 1,
+  "graph": {
+    "format": "cocoaworlds.material",
+    "version": 1
+  },
+  "library": "\nconst float PI = 3.14159265;\nfloat hash12(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }\nvec2 hash22(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973)); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.xx + p3.yz) * p3.zy); }\nvec2 seedv(float s) { return vec2(s * 17.317 + 3.1, s * 41.913 + 7.7); }\nfloat valueNoise(vec2 p, float per, float s) {\n  vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3. - 2. * f); vec2 o = seedv(s);\n  float a = hash12(mod(i, per) + o), b = hash12(mod(i + vec2(1., 0.), per) + o);\n  float c = hash12(mod(i + vec2(0., 1.), per) + o), d = hash12(mod(i + vec2(1., 1.), per) + o);\n  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);\n}\nvec2 gradAt(vec2 c, float per, vec2 o) { float a = hash12(mod(c, per) + o) * 6.2831853; return vec2(cos(a), sin(a)); }\nfloat gradNoise(vec2 p, float per, float s) {\n  vec2 i = floor(p), f = fract(p); vec2 u = f * f * f * (f * (f * 6. - 15.) + 10.); vec2 o = seedv(s);\n  float a = dot(gradAt(i, per, o), f), b = dot(gradAt(i + vec2(1., 0.), per, o), f - vec2(1., 0.));\n  float c = dot(gradAt(i + vec2(0., 1.), per, o), f - vec2(0., 1.)), d = dot(gradAt(i + vec2(1., 1.), per, o), f - vec2(1., 1.));\n  return clamp(0.5 + 1.35 * mix(mix(a, b, u.x), mix(c, d, u.x), u.y), 0., 1.);\n}\nfloat fbm(vec2 uv, float scale, float oct, float rough, float kind, float s) {\n  float sum = 0., amp = 1., norm = 0.;\n  for (int k = 0; k < 10; k++) {\n    if (float(k) >= oct) break;\n    float per = scale * exp2(float(k));\n    vec2 p = uv * per;\n    float n = kind > 0.5 && kind < 1.5 ? valueNoise(p, per, s + float(k)) : gradNoise(p, per, s + float(k));\n    if (kind > 1.5) n = 1. - abs(n * 2. - 1.);\n    sum += n * amp; norm += amp; amp *= rough;\n  }\n  return sum / max(norm, 1e-5);\n}\nvec3 voronoi(vec2 uv, float scale, float jitter, float s) {\n  vec2 p = uv * scale; vec2 i = floor(p); vec2 f = p - i; vec2 o = seedv(s);\n  float f1 = 8., f2 = 8., id = 0.;\n  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {\n    vec2 c = vec2(float(x), float(y)); vec2 w = mod(i + c, scale);\n    vec2 pt = c + 0.5 + (hash22(w + o) - 0.5) * jitter;\n    float d = length(pt - f);\n    if (d < f1) { f2 = f1; f1 = d; id = hash12(w + o + 7.7); } else if (d < f2) f2 = d;\n  }\n  return vec3(f1, f2, id);\n}\nfloat curve4(float x, float y0, float y1, float y2, float y3) {\n  float t = x * 3.; int k = int(min(floor(t), 2.)); float f = t - float(k);\n  float p0, p1, p2, p3;\n  if (k == 0) { p0 = y0 - (y1 - y0); p1 = y0; p2 = y1; p3 = y2; }\n  else if (k == 1) { p0 = y0; p1 = y1; p2 = y2; p3 = y3; }\n  else { p0 = y1; p1 = y2; p2 = y3; p3 = y3 + (y3 - y2); }\n  float f2 = f * f, f3 = f2 * f;\n  return clamp(0.5 * (2. * p1 + (-p0 + p2) * f + (2. * p0 - 5. * p1 + 4. * p2 - p3) * f2 + (-p0 + 3. * p1 - 3. * p2 + p3) * f3), 0., 1.);\n}\nvec3 ramp(float x, vec3 cs[8], float ts[8], float n) {\n  if (x <= ts[0]) return cs[0];\n  vec3 last = cs[0];\n  for (int k = 1; k < 8; k++) {\n    if (float(k) >= n) break;\n    if (x <= ts[k]) return mix(cs[k - 1], cs[k], (x - ts[k - 1]) / max(ts[k] - ts[k - 1], 1e-5));\n    last = cs[k];\n  }\n  return last;\n}\nvec3 rgb2hsv(vec3 c) {\n  vec4 K = vec4(0., -1. / 3., 2. / 3., -1.);\n  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));\n  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));\n  float d = q.x - min(q.w, q.y); float e = 1.0e-10;\n  return vec3(abs(q.z + (q.w - q.y) / (6. * d + e)), d / (q.x + e), q.x);\n}\nvec3 hsv2rgb(vec3 c) {\n  vec3 p = abs(fract(c.xxx + vec3(1., 2. / 3., 1. / 3.)) * 6. - 3.);\n  return c.z * mix(vec3(1.), clamp(p - 1., 0., 1.), c.y);\n}\n",
+  "vertexShader": "#version 300 es\nin vec2 a_pos;\nout vec2 vUv;\nvoid main() { vUv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0., 1.); }",
+  "nodes": [
+    {
+      "type": "noise",
+      "group": "make",
+      "label": {
+        "en": "Noise",
+        "ru": "Шум"
+      },
+      "hint": {
+        "en": "Cloudy random patterns: soft (Perlin), blocky (value) or ridged like veins.",
+        "ru": "Облачные случайные узоры: мягкие (Перлин), пятнистые или с прожилками."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "kind",
+          "kind": "choice",
+          "label": {
+            "en": "Kind",
+            "ru": "Вид"
+          },
+          "default": "perlin",
+          "options": [
+            {
+              "value": "perlin",
+              "label": {
+                "en": "Perlin",
+                "ru": "Перлин"
+              }
+            },
+            {
+              "value": "value",
+              "label": {
+                "en": "Value",
+                "ru": "Пятна"
+              }
+            },
+            {
+              "value": "ridged",
+              "label": {
+                "en": "Ridged",
+                "ru": "Прожилки"
+              }
+            }
+          ]
+        },
+        {
+          "id": "scale",
+          "kind": "int",
+          "label": {
+            "en": "Scale",
+            "ru": "Масштаб"
+          },
+          "default": 4,
+          "min": 1,
+          "max": 64
+        },
+        {
+          "id": "octaves",
+          "kind": "int",
+          "label": {
+            "en": "Detail",
+            "ru": "Детали"
+          },
+          "default": 5,
+          "min": 1,
+          "max": 10
+        },
+        {
+          "id": "roughness",
+          "kind": "number",
+          "label": {
+            "en": "Roughness",
+            "ru": "Грубость"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "outColor = vec4(vec3(fbm(uv, p_scale, p_octaves, p_roughness, p_kind, p_seed)), 1.);",
+      "hash": "51f0fd0e"
+    },
+    {
+      "type": "cells",
+      "group": "make",
+      "label": {
+        "en": "Cells",
+        "ru": "Ячейки"
+      },
+      "hint": {
+        "en": "Cells around random points (Voronoi): stones, scales, cracked mud.",
+        "ru": "Ячейки вокруг случайных точек (Вороной): камни, чешуя, трещины."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "mode",
+          "kind": "choice",
+          "label": {
+            "en": "Shows",
+            "ru": "Показывает"
+          },
+          "default": "distance",
+          "options": [
+            {
+              "value": "distance",
+              "label": {
+                "en": "Distance",
+                "ru": "Расстояние"
+              }
+            },
+            {
+              "value": "edges",
+              "label": {
+                "en": "Edges",
+                "ru": "Границы"
+              }
+            },
+            {
+              "value": "random",
+              "label": {
+                "en": "Random per cell",
+                "ru": "Случайно по ячейкам"
+              }
+            }
+          ]
+        },
+        {
+          "id": "scale",
+          "kind": "int",
+          "label": {
+            "en": "Scale",
+            "ru": "Масштаб"
+          },
+          "default": 6,
+          "min": 1,
+          "max": 64
+        },
+        {
+          "id": "jitter",
+          "kind": "number",
+          "label": {
+            "en": "Randomness",
+            "ru": "Случайность"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "width",
+          "kind": "number",
+          "label": {
+            "en": "Edge width",
+            "ru": "Ширина границ"
+          },
+          "default": 0.08,
+          "min": 0.01,
+          "max": 0.5
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "vec3 v = voronoi(uv, p_scale, p_jitter, p_seed);\nfloat r = p_mode < 0.5 ? clamp(v.x, 0., 1.) : p_mode < 1.5 ? smoothstep(0., p_width, v.y - v.x) : v.z;\noutColor = vec4(vec3(r), 1.);",
+      "hash": "d5e50a4b"
+    },
+    {
+      "type": "bricks",
+      "group": "make",
+      "label": {
+        "en": "Bricks and tiles",
+        "ru": "Кирпичи и плитка"
+      },
+      "hint": {
+        "en": "Rows of bricks or tiles with mortar between them; white is brick, black mortar.",
+        "ru": "Ряды кирпичей или плитки со швами; белое — кирпич, чёрное — шов."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "rows",
+          "kind": "int",
+          "label": {
+            "en": "Rows",
+            "ru": "Рядов"
+          },
+          "default": 8,
+          "min": 1,
+          "max": 64
+        },
+        {
+          "id": "columns",
+          "kind": "int",
+          "label": {
+            "en": "Columns",
+            "ru": "Столбцов"
+          },
+          "default": 4,
+          "min": 1,
+          "max": 64
+        },
+        {
+          "id": "offset",
+          "kind": "number",
+          "label": {
+            "en": "Offset",
+            "ru": "Сдвиг"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "mortar",
+          "kind": "number",
+          "label": {
+            "en": "Mortar",
+            "ru": "Шов"
+          },
+          "default": 0.06,
+          "min": 0,
+          "max": 0.5
+        },
+        {
+          "id": "bevel",
+          "kind": "number",
+          "label": {
+            "en": "Bevel",
+            "ru": "Скос"
+          },
+          "default": 0.12,
+          "min": 0,
+          "max": 0.5
+        },
+        {
+          "id": "random",
+          "kind": "number",
+          "label": {
+            "en": "Random brightness",
+            "ru": "Разная яркость"
+          },
+          "default": 0.3,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "float y = uv.y * p_rows; float row = floor(y);\nfloat x = uv.x * p_columns + p_offset * mod(row, 2.); float col = floor(x);\nvec2 f = vec2(fract(x), fract(y));\n// Distance to the brick's edge, in row heights.\nfloat dx = min(f.x, 1. - f.x) * p_rows / p_columns, dy = min(f.y, 1. - f.y);\nfloat d = min(dx, dy) - p_mortar * 0.5;\nfloat r = hash12(vec2(mod(col, p_columns), mod(row, p_rows)) + seedv(p_seed));\nfloat h = d <= 0. ? 0. : (p_bevel > 0. ? smoothstep(0., p_bevel, d) : 1.) * (1. - p_random * r);\noutColor = vec4(vec3(h), 1.);",
+      "hash": "ab639cef"
+    },
+    {
+      "type": "shape",
+      "group": "make",
+      "label": {
+        "en": "Shape",
+        "ru": "Фигура"
+      },
+      "hint": {
+        "en": "A circle, square, polygon or star, repeated to tile.",
+        "ru": "Круг, квадрат, многоугольник или звезда, повторённые плиткой."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "kind",
+          "kind": "choice",
+          "label": {
+            "en": "Kind",
+            "ru": "Вид"
+          },
+          "default": "circle",
+          "options": [
+            {
+              "value": "circle",
+              "label": {
+                "en": "Circle",
+                "ru": "Круг"
+              }
+            },
+            {
+              "value": "square",
+              "label": {
+                "en": "Square",
+                "ru": "Квадрат"
+              }
+            },
+            {
+              "value": "polygon",
+              "label": {
+                "en": "Polygon",
+                "ru": "Многоугольник"
+              }
+            },
+            {
+              "value": "star",
+              "label": {
+                "en": "Star",
+                "ru": "Звезда"
+              }
+            }
+          ]
+        },
+        {
+          "id": "sides",
+          "kind": "int",
+          "label": {
+            "en": "Sides",
+            "ru": "Сторон"
+          },
+          "default": 6,
+          "min": 3,
+          "max": 12
+        },
+        {
+          "id": "size",
+          "kind": "number",
+          "label": {
+            "en": "Size",
+            "ru": "Размер"
+          },
+          "default": 0.7,
+          "min": 0,
+          "max": 1.5
+        },
+        {
+          "id": "softness",
+          "kind": "number",
+          "label": {
+            "en": "Softness",
+            "ru": "Мягкость"
+          },
+          "default": 0.05,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "tiles",
+          "kind": "int",
+          "label": {
+            "en": "Repeat",
+            "ru": "Повторов"
+          },
+          "default": 1,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "id": "angle",
+          "kind": "number",
+          "label": {
+            "en": "Turn",
+            "ru": "Поворот"
+          },
+          "default": 0,
+          "min": 0,
+          "max": 360,
+          "step": 1
+        }
+      ],
+      "glsl": "vec2 p = fract(uv * p_tiles) - 0.5;\nfloat a0 = radians(p_angle); p = mat2(cos(a0), -sin(a0), sin(a0), cos(a0)) * p;\nfloat d;\nif (p_kind < 0.5) d = length(p) * 2.;\nelse if (p_kind < 1.5) d = max(abs(p.x), abs(p.y)) * 2.;\nelse {\n  float a = atan(p.x, -p.y) + PI; float r = 2. * PI / p_sides;\n  d = cos(floor(0.5 + a / r) * r - a) * length(p) * 2.;\n  if (p_kind > 2.5) { float k = abs(fract(a / r) - 0.5) * 2.; d *= mix(1.6, 0.8, k); }\n}\nfloat s = max(p_softness * 0.5, 0.002);\noutColor = vec4(vec3(1. - smoothstep(p_size - s, p_size + s, d)), 1.);",
+      "hash": "9cb8fe82"
+    },
+    {
+      "type": "gradient",
+      "group": "make",
+      "label": {
+        "en": "Gradient",
+        "ru": "Градиент"
+      },
+      "hint": {
+        "en": "Dark to light across the square. Linear doesn’t tile; mirrored and round do.",
+        "ru": "От тёмного к светлому. Линейный не стыкуется плиткой; зеркальный и круглый — да."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "kind",
+          "kind": "choice",
+          "label": {
+            "en": "Kind",
+            "ru": "Вид"
+          },
+          "default": "mirrored",
+          "options": [
+            {
+              "value": "linear",
+              "label": {
+                "en": "Linear",
+                "ru": "Линейный"
+              }
+            },
+            {
+              "value": "mirrored",
+              "label": {
+                "en": "Mirrored",
+                "ru": "Зеркальный"
+              }
+            },
+            {
+              "value": "radial",
+              "label": {
+                "en": "Round",
+                "ru": "Круглый"
+              }
+            }
+          ]
+        },
+        {
+          "id": "direction",
+          "kind": "choice",
+          "label": {
+            "en": "Direction",
+            "ru": "Направление"
+          },
+          "default": "down",
+          "options": [
+            {
+              "value": "across",
+              "label": {
+                "en": "Across",
+                "ru": "Поперёк"
+              }
+            },
+            {
+              "value": "down",
+              "label": {
+                "en": "Down",
+                "ru": "Вниз"
+              }
+            }
+          ]
+        },
+        {
+          "id": "tiles",
+          "kind": "int",
+          "label": {
+            "en": "Repeat",
+            "ru": "Повторов"
+          },
+          "default": 1,
+          "min": 1,
+          "max": 32
+        }
+      ],
+      "glsl": "vec2 q = fract(uv * p_tiles); float t = p_direction < 0.5 ? q.x : q.y;\nfloat v = p_kind < 0.5 ? t : p_kind < 1.5 ? 1. - abs(t * 2. - 1.) : 1. - clamp(length(q - 0.5) * 2., 0., 1.);\noutColor = vec4(vec3(v), 1.);",
+      "hash": "38b10291"
+    },
+    {
+      "type": "checker",
+      "group": "make",
+      "label": {
+        "en": "Checker",
+        "ru": "Шахматы"
+      },
+      "hint": {
+        "en": "Black and white squares.",
+        "ru": "Чёрные и белые клетки."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "tiles",
+          "kind": "int",
+          "label": {
+            "en": "Squares across",
+            "ru": "Клеток в ряд"
+          },
+          "default": 8,
+          "min": 1,
+          "max": 64
+        }
+      ],
+      "glsl": "float v = mod(floor(uv.x * p_tiles) + floor(uv.y * p_tiles), 2.); outColor = vec4(vec3(v), 1.);",
+      "hash": "637006f6"
+    },
+    {
+      "type": "scratches",
+      "group": "make",
+      "label": {
+        "en": "Scratches",
+        "ru": "Царапины"
+      },
+      "hint": {
+        "en": "Thin random lines, mostly one way: scuffed metal, scratched paint.",
+        "ru": "Тонкие случайные линии: потёртый металл, поцарапанная краска."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "density",
+          "kind": "int",
+          "label": {
+            "en": "How many",
+            "ru": "Сколько"
+          },
+          "default": 8,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "id": "length",
+          "kind": "number",
+          "label": {
+            "en": "Length",
+            "ru": "Длина"
+          },
+          "default": 0.6,
+          "min": 0.05,
+          "max": 1.5
+        },
+        {
+          "id": "width",
+          "kind": "number",
+          "label": {
+            "en": "Width",
+            "ru": "Толщина"
+          },
+          "default": 0.01,
+          "min": 0.002,
+          "max": 0.1
+        },
+        {
+          "id": "angle",
+          "kind": "number",
+          "label": {
+            "en": "Direction",
+            "ru": "Направление"
+          },
+          "default": 30,
+          "min": 0,
+          "max": 180,
+          "step": 1
+        },
+        {
+          "id": "spread",
+          "kind": "number",
+          "label": {
+            "en": "Spread",
+            "ru": "Разброс"
+          },
+          "default": 0.3,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "vec2 p = uv * p_density; vec2 i = floor(p); float v = 0.;\nfor (int y = -2; y <= 2; y++) for (int x = -2; x <= 2; x++) {\n  vec2 c = i + vec2(x, y); vec2 w = mod(c, p_density) + seedv(p_seed);\n  vec2 h = hash22(w);\n  vec2 centre = c + h;\n  float a = radians(p_angle) + (hash12(w + 3.1) - 0.5) * p_spread * PI;\n  // (Half its length in cells, at most what the 5 × 5 cells looked at can hold.)\n  vec2 dir = vec2(cos(a), sin(a)) * min(p_length * 0.5 * p_density, 2.2) * (0.5 + 0.5 * hash12(w + 9.2));\n  vec2 pa = p - (centre - dir), ba = dir * 2.;\n  float t = clamp(dot(pa, ba) / dot(ba, ba), 0., 1.);\n  float d = length(pa - ba * t) / p_density;\n  v = max(v, (1. - smoothstep(0., p_width, d)) * (0.4 + 0.6 * hash12(w + 5.7)));\n}\noutColor = vec4(vec3(v), 1.);",
+      "hash": "66661f37"
+    },
+    {
+      "type": "grunge",
+      "group": "make",
+      "label": {
+        "en": "Grunge",
+        "ru": "Грязь"
+      },
+      "hint": {
+        "en": "Blotchy dirt and stains (noise warped by noise).",
+        "ru": "Пятна грязи и разводы (шум, искажённый шумом)."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "style",
+          "kind": "choice",
+          "label": {
+            "en": "Style",
+            "ru": "Вид"
+          },
+          "default": "blotches",
+          "options": [
+            {
+              "value": "blotches",
+              "label": {
+                "en": "Blotches",
+                "ru": "Пятна"
+              }
+            },
+            {
+              "value": "streaks",
+              "label": {
+                "en": "Streaks (running down)",
+                "ru": "Потёки"
+              }
+            },
+            {
+              "value": "speckles",
+              "label": {
+                "en": "Speckles",
+                "ru": "Крапинки"
+              }
+            },
+            {
+              "value": "rust",
+              "label": {
+                "en": "Rust",
+                "ru": "Ржавчина"
+              }
+            }
+          ]
+        },
+        {
+          "id": "scale",
+          "kind": "int",
+          "label": {
+            "en": "Scale",
+            "ru": "Масштаб"
+          },
+          "default": 3,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "id": "warp",
+          "kind": "number",
+          "label": {
+            "en": "Swirl",
+            "ru": "Завихрение"
+          },
+          "default": 0.4,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "contrast",
+          "kind": "number",
+          "label": {
+            "en": "Contrast",
+            "ru": "Контраст"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "amount",
+          "kind": "number",
+          "label": {
+            "en": "Amount",
+            "ru": "Количество"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "vec2 q = uv + p_warp * 0.25 * (vec2(fbm(uv, p_scale, 4., 0.5, 0., p_seed), fbm(uv, p_scale, 4., 0.5, 0., p_seed + 11.)) - 0.5);\nfloat v;\nif (p_style < 0.5) v = fbm(q, p_scale * 2., 7., 0.55, 0., p_seed + 23.);\n// Streaks: stretched up and down (eight times finer across, still tiling).\nelse if (p_style < 1.5) v = fbm(vec2(q.x * 8., q.y), p_scale * 2., 6., 0.5, 0., p_seed + 23.) * (0.6 + 0.4 * fbm(q, p_scale, 3., 0.5, 0., p_seed + 5.));\n// Speckles: small spots, more where a broad noise says so.\nelse if (p_style < 2.5) v = valueNoise(q * p_scale * 24., p_scale * 24., p_seed + 31.) * (0.4 + 0.8 * fbm(uv, p_scale, 3., 0.5, 0., p_seed + 7.));\n// Rust: veined patches.\nelse v = fbm(q, p_scale * 2., 6., 0.6, 2., p_seed + 41.) * fbm(uv, p_scale, 4., 0.5, 0., p_seed + 3.) * 1.4;\nfloat c = mix(0.5, 0.02, p_contrast); float m = 1. - p_amount;\noutColor = vec4(vec3(smoothstep(m - c, m + c, v)), 1.);",
+      "hash": "d1a9bd5f"
+    },
+    {
+      "type": "image",
+      "group": "make",
+      "label": {
+        "en": "Image",
+        "ru": "Картинка"
+      },
+      "hint": {
+        "en": "A picture from the project’s textures.",
+        "ru": "Картинка из текстур проекта."
+      },
+      "inputs": [],
+      "output": "color",
+      "params": [
+        {
+          "id": "image",
+          "kind": "image",
+          "label": {
+            "en": "Image",
+            "ru": "Картинка"
+          },
+          "default": ""
+        }
+      ],
+      "glsl": "outColor = p_image_ok > 0.5 ? vec4(texture(p_image, uv).rgb, 1.) : vec4(mod(floor(uv.x * 8.) + floor(uv.y * 8.), 2.) * vec3(1., 0., 0.86), 1.);",
+      "hash": "af716a1e"
+    },
+    {
+      "type": "color",
+      "group": "make",
+      "label": {
+        "en": "Colour",
+        "ru": "Цвет"
+      },
+      "hint": {
+        "en": "One flat colour.",
+        "ru": "Один ровный цвет."
+      },
+      "inputs": [],
+      "output": "color",
+      "params": [
+        {
+          "id": "color",
+          "kind": "color",
+          "label": {
+            "en": "Colour",
+            "ru": "Цвет"
+          },
+          "default": "#b08c64"
+        }
+      ],
+      "glsl": "outColor = vec4(p_color, 1.);",
+      "hash": "8ec5675c"
+    },
+    {
+      "type": "value",
+      "group": "make",
+      "label": {
+        "en": "Number",
+        "ru": "Число"
+      },
+      "hint": {
+        "en": "One flat grey (0 black, 1 white): a roughness, a metal amount.",
+        "ru": "Ровный серый (0 — чёрный, 1 — белый): шероховатость, металличность."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "value",
+          "kind": "number",
+          "label": {
+            "en": "Value",
+            "ru": "Значение"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "glsl": "outColor = vec4(vec3(p_value), 1.);",
+      "hash": "ecc7ac61"
+    },
+    {
+      "type": "levels",
+      "group": "change",
+      "label": {
+        "en": "Levels",
+        "ru": "Уровни"
+      },
+      "hint": {
+        "en": "Stretch, squeeze and shift the tones: more contrast, darker, lighter.",
+        "ru": "Растянуть, сжать и сдвинуть тона: контраст, темнее, светлее."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "inLow",
+          "kind": "number",
+          "label": {
+            "en": "Black point",
+            "ru": "Точка чёрного"
+          },
+          "default": 0,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "inHigh",
+          "kind": "number",
+          "label": {
+            "en": "White point",
+            "ru": "Точка белого"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "gamma",
+          "kind": "number",
+          "label": {
+            "en": "Midtones",
+            "ru": "Средние тона"
+          },
+          "default": 1,
+          "min": 0.1,
+          "max": 4
+        },
+        {
+          "id": "outLow",
+          "kind": "number",
+          "label": {
+            "en": "Darkest",
+            "ru": "Самое тёмное"
+          },
+          "default": 0,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "outHigh",
+          "kind": "number",
+          "label": {
+            "en": "Lightest",
+            "ru": "Самое светлое"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "glsl": "vec3 c = inC_in(uv).rgb;\nvec3 x = clamp((c - p_inLow) / max(p_inHigh - p_inLow, 1e-4), 0., 1.);\nx = pow(x, vec3(1. / p_gamma));\noutColor = vec4(mix(vec3(p_outLow), vec3(p_outHigh), x), 1.);",
+      "hash": "d67bb2ae"
+    },
+    {
+      "type": "curve",
+      "group": "change",
+      "label": {
+        "en": "Curve",
+        "ru": "Кривая"
+      },
+      "hint": {
+        "en": "Reshape the tones with four points (black, dark, light, white).",
+        "ru": "Изменить тона четырьмя точками (чёрное, тёмное, светлое, белое)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "y0",
+          "kind": "number",
+          "label": {
+            "en": "Black becomes",
+            "ru": "Чёрное станет"
+          },
+          "default": 0,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "y1",
+          "kind": "number",
+          "label": {
+            "en": "Dark becomes",
+            "ru": "Тёмное станет"
+          },
+          "default": 0.333,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "y2",
+          "kind": "number",
+          "label": {
+            "en": "Light becomes",
+            "ru": "Светлое станет"
+          },
+          "default": 0.667,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "y3",
+          "kind": "number",
+          "label": {
+            "en": "White becomes",
+            "ru": "Белое станет"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "glsl": "vec3 c = clamp(inC_in(uv).rgb, 0., 1.); outColor = vec4(curve4(c.r, p_y0, p_y1, p_y2, p_y3), curve4(c.g, p_y0, p_y1, p_y2, p_y3), curve4(c.b, p_y0, p_y1, p_y2, p_y3), 1.);",
+      "hash": "b9c35fd9"
+    },
+    {
+      "type": "invert",
+      "group": "change",
+      "label": {
+        "en": "Invert",
+        "ru": "Инверсия"
+      },
+      "hint": {
+        "en": "Black becomes white, and the other way round.",
+        "ru": "Чёрное становится белым, и наоборот."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [],
+      "glsl": "outColor = vec4(1. - inC_in(uv).rgb, 1.);",
+      "hash": "7ea3f134"
+    },
+    {
+      "type": "clamp",
+      "group": "change",
+      "label": {
+        "en": "Clamp",
+        "ru": "Ограничить"
+      },
+      "hint": {
+        "en": "Keep values between a lowest and a highest.",
+        "ru": "Удержать значения между нижним и верхним."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "min",
+          "kind": "number",
+          "label": {
+            "en": "Lowest",
+            "ru": "Нижнее"
+          },
+          "default": 0,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "max",
+          "kind": "number",
+          "label": {
+            "en": "Highest",
+            "ru": "Верхнее"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "glsl": "outColor = vec4(clamp(inC_in(uv).rgb, p_min, p_max), 1.);",
+      "hash": "0eedc580"
+    },
+    {
+      "type": "blur",
+      "group": "change",
+      "label": {
+        "en": "Blur",
+        "ru": "Размытие"
+      },
+      "hint": {
+        "en": "Soften: a share of the square to blur across.",
+        "ru": "Смягчить: на какую долю квадрата размывать."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "radius",
+          "kind": "number",
+          "label": {
+            "en": "Radius",
+            "ru": "Радиус"
+          },
+          "default": 0.01,
+          "min": 0,
+          "max": 0.1,
+          "step": 0.001
+        }
+      ],
+      "glsl": "vec3 s = vec3(0.); float w = 0.;\nfor (int y = -3; y <= 3; y++) for (int x = -3; x <= 3; x++) {\n  vec2 o = vec2(x, y) / 3.; float k = exp(-dot(o, o) * 2.);\n  s += inC_in(uv + o * p_radius).rgb * k; w += k;\n}\noutColor = vec4(s / w, 1.);",
+      "hash": "cf979483"
+    },
+    {
+      "type": "warp",
+      "group": "change",
+      "label": {
+        "en": "Warp",
+        "ru": "Искажение"
+      },
+      "hint": {
+        "en": "Push the picture around by another one: along its slopes, or one way by its brightness.",
+        "ru": "Сдвинуть картинку другой: вдоль её склонов или в одну сторону по яркости."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "by",
+          "kind": "grey",
+          "label": {
+            "en": "By",
+            "ru": "Чем"
+          },
+          "fallback": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "mode",
+          "kind": "choice",
+          "label": {
+            "en": "How",
+            "ru": "Как"
+          },
+          "default": "slope",
+          "options": [
+            {
+              "value": "slope",
+              "label": {
+                "en": "Along slopes",
+                "ru": "Вдоль склонов"
+              }
+            },
+            {
+              "value": "direction",
+              "label": {
+                "en": "One way",
+                "ru": "В одну сторону"
+              }
+            }
+          ]
+        },
+        {
+          "id": "amount",
+          "kind": "number",
+          "label": {
+            "en": "Amount",
+            "ru": "Сила"
+          },
+          "default": 0.2,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "angle",
+          "kind": "number",
+          "label": {
+            "en": "Direction",
+            "ru": "Направление"
+          },
+          "default": 0,
+          "min": 0,
+          "max": 360,
+          "step": 1
+        }
+      ],
+      "glsl": "vec2 off;\nif (p_mode < 0.5) { float e = 1. / 256.; off = vec2(inG_by(uv + vec2(e, 0.)) - inG_by(uv - vec2(e, 0.)), inG_by(uv + vec2(0., e)) - inG_by(uv - vec2(0., e))) / (2. * e) * p_amount * 0.01; }\nelse off = vec2(cos(radians(p_angle)), sin(radians(p_angle))) * (inG_by(uv) - 0.5) * p_amount * 0.25;\noutColor = vec4(inC_in(uv + off).rgb, 1.);",
+      "hash": "70337ce7"
+    },
+    {
+      "type": "directionalWarp",
+      "group": "change",
+      "label": {
+        "en": "Directional warp",
+        "ru": "Направленное искажение"
+      },
+      "hint": {
+        "en": "Push the picture along one direction by how bright another is: once (a shift), or flowing step by step (smeared, streaky).",
+        "ru": "Сдвинуть картинку в одном направлении по яркости другой: один раз (сдвиг) или течением шаг за шагом (размазанно, полосами)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "by",
+          "kind": "grey",
+          "label": {
+            "en": "Intensity",
+            "ru": "Сила"
+          },
+          "fallback": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "angle",
+          "kind": "number",
+          "label": {
+            "en": "Direction",
+            "ru": "Направление"
+          },
+          "default": 0,
+          "min": 0,
+          "max": 360,
+          "step": 1
+        },
+        {
+          "id": "amount",
+          "kind": "number",
+          "label": {
+            "en": "Amount",
+            "ru": "Сила"
+          },
+          "default": 0.15,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "mode",
+          "kind": "choice",
+          "label": {
+            "en": "How",
+            "ru": "Как"
+          },
+          "default": "shift",
+          "options": [
+            {
+              "value": "shift",
+              "label": {
+                "en": "Shift",
+                "ru": "Сдвиг"
+              }
+            },
+            {
+              "value": "flow",
+              "label": {
+                "en": "Flow",
+                "ru": "Течение"
+              }
+            }
+          ]
+        },
+        {
+          "id": "centred",
+          "kind": "bool",
+          "label": {
+            "en": "Grey stays put",
+            "ru": "Серое на месте"
+          },
+          "default": true
+        }
+      ],
+      "glsl": "vec2 dir = vec2(cos(radians(p_angle)), sin(radians(p_angle)));\nfloat bias = p_centred > 0.5 ? 0.5 : 0.;\nvec2 q = uv;\nif (p_mode < 0.5) q += dir * (inG_by(uv) - bias) * p_amount;\nelse for (int k = 0; k < 12; k++) q += dir * (inG_by(q) - bias) * p_amount / 12.;\noutColor = vec4(inC_in(q).rgb, 1.);",
+      "hash": "0c73c1a6"
+    },
+    {
+      "type": "floodFill",
+      "group": "change",
+      "label": {
+        "en": "Flood fill",
+        "ru": "Заливка областей"
+      },
+      "hint": {
+        "en": "Give each separate white shape of a mask (each brick, tile, plank) its own value: a random grey or colour, a gradient across it, or where it is. Exact for rectangular shapes.",
+        "ru": "Дать каждой отдельной белой фигуре маски (кирпичу, плитке, доске) своё значение: случайный серый или цвет, градиент по ней или её положение. Точно для прямоугольных фигур."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Mask",
+            "ru": "Маска"
+          },
+          "fallback": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "gives",
+          "kind": "choice",
+          "label": {
+            "en": "Gives",
+            "ru": "Выдаёт"
+          },
+          "default": "grey",
+          "options": [
+            {
+              "value": "grey",
+              "label": {
+                "en": "Random grey",
+                "ru": "Случайный серый"
+              }
+            },
+            {
+              "value": "colour",
+              "label": {
+                "en": "Random colour",
+                "ru": "Случайный цвет"
+              }
+            },
+            {
+              "value": "gradient",
+              "label": {
+                "en": "Gradient",
+                "ru": "Градиент"
+              }
+            },
+            {
+              "value": "position",
+              "label": {
+                "en": "Position",
+                "ru": "Положение"
+              }
+            },
+            {
+              "value": "size",
+              "label": {
+                "en": "Size",
+                "ru": "Размер"
+              }
+            }
+          ]
+        },
+        {
+          "id": "direction",
+          "kind": "choice",
+          "label": {
+            "en": "Gradient",
+            "ru": "Градиент"
+          },
+          "default": "random",
+          "options": [
+            {
+              "value": "across",
+              "label": {
+                "en": "Across",
+                "ru": "Поперёк"
+              }
+            },
+            {
+              "value": "down",
+              "label": {
+                "en": "Down",
+                "ru": "Вниз"
+              }
+            },
+            {
+              "value": "random",
+              "label": {
+                "en": "Random way",
+                "ru": "Случайно"
+              }
+            }
+          ]
+        },
+        {
+          "id": "threshold",
+          "kind": "number",
+          "label": {
+            "en": "White from",
+            "ru": "Белое от"
+          },
+          "default": 0.5,
+          "min": 0.01,
+          "max": 0.99
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "if (inG_in(uv) < p_threshold) { outColor = vec4(0., 0., 0., 1.); return; }\n// The shape's extent: step out each way until the mask goes dark (2 pixels a step).\nfloat st = u_px * 2.; float l = 0., r = 0., u = 0., d = 0.;\nfor (int k = 1; k <= 160; k++) { if (inG_in(uv - vec2(float(k) * st, 0.)) < p_threshold) break; l = float(k) * st; }\nfor (int k = 1; k <= 160; k++) { if (inG_in(uv + vec2(float(k) * st, 0.)) < p_threshold) break; r = float(k) * st; }\nfor (int k = 1; k <= 160; k++) { if (inG_in(uv - vec2(0., float(k) * st)) < p_threshold) break; u = float(k) * st; }\nfor (int k = 1; k <= 160; k++) { if (inG_in(uv + vec2(0., float(k) * st)) < p_threshold) break; d = float(k) * st; }\nvec2 lo = uv - vec2(l, u), hi = uv + vec2(r, d);\nvec2 ctr = fract((lo + hi) * 0.5);\n// One id per shape: its centre, rounded to a few pixels so every pixel of it agrees (wrapped whole, so a shape\n// crossing the square's edge gets one id on both sides).\nfloat cell = st * 4.; float n = floor(1. / cell + 0.5);\nvec2 id = mod(floor((lo + hi) * 0.5 / cell + 0.5), n);\nfloat h = hash12(id + seedv(p_seed));\nint g = int(p_gives + 0.5); vec3 c;\nif (g == 0) c = vec3(h);\nelse if (g == 1) c = hsv2rgb(vec3(h, 0.55 + 0.4 * hash12(id + seedv(p_seed) + 3.3), 0.6 + 0.4 * hash12(id + seedv(p_seed) + 7.1)));\nelse if (g == 2) {\n  vec2 t = (uv - lo) / max(hi - lo, vec2(1e-4));\n  float a = p_direction < 0.5 ? 0. : p_direction < 1.5 ? 1.5707963 : h * 6.2831853;\n  vec2 dv = vec2(cos(a), sin(a));\n  float v = dot(t - 0.5, dv) / (abs(dv.x) * 0.5 + abs(dv.y) * 0.5 + 1e-4) * 0.5 + 0.5;\n  c = vec3(clamp(v, 0., 1.));\n}\nelse if (g == 3) c = vec3(ctr, 0.);\nelse c = vec3(clamp((hi - lo) * 1., 0., 1.), 0.);\noutColor = vec4(c, 1.);",
+      "hash": "47a3a396"
+    },
+    {
+      "type": "transform",
+      "group": "change",
+      "label": {
+        "en": "Transform",
+        "ru": "Трансформация"
+      },
+      "hint": {
+        "en": "Repeat, slide or turn the picture (in quarter turns, so it still tiles).",
+        "ru": "Повторить, сдвинуть или повернуть картинку (на четверть оборота, чтобы стыковалась)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "tiles",
+          "kind": "int",
+          "label": {
+            "en": "Repeat",
+            "ru": "Повторов"
+          },
+          "default": 2,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "id": "x",
+          "kind": "number",
+          "label": {
+            "en": "Slide across",
+            "ru": "Сдвиг поперёк"
+          },
+          "default": 0,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "y",
+          "kind": "number",
+          "label": {
+            "en": "Slide down",
+            "ru": "Сдвиг вниз"
+          },
+          "default": 0,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "turn",
+          "kind": "choice",
+          "label": {
+            "en": "Turn",
+            "ru": "Поворот"
+          },
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": {
+                "en": "None",
+                "ru": "Нет"
+              }
+            },
+            {
+              "value": "90",
+              "label": {
+                "en": "90°",
+                "ru": "90°"
+              }
+            },
+            {
+              "value": "180",
+              "label": {
+                "en": "180°",
+                "ru": "180°"
+              }
+            },
+            {
+              "value": "270",
+              "label": {
+                "en": "270°",
+                "ru": "270°"
+              }
+            }
+          ]
+        }
+      ],
+      "glsl": "vec2 q = uv - 0.5;\nif (p_turn > 0.5 && p_turn < 1.5) q = vec2(-q.y, q.x); else if (p_turn > 1.5 && p_turn < 2.5) q = -q; else if (p_turn > 2.5) q = vec2(q.y, -q.x);\noutColor = vec4(inC_in((q + 0.5) * p_tiles + vec2(p_x, p_y)).rgb, 1.);",
+      "hash": "82a8e34b"
+    },
+    {
+      "type": "slopeBlur",
+      "group": "change",
+      "label": {
+        "en": "Slope blur",
+        "ru": "Размытие по склону"
+      },
+      "hint": {
+        "en": "Smear a picture along the slopes of another: melted, eroded or flowing looks.",
+        "ru": "Размазать картинку вдоль склонов другой: оплавленный, выветренный, текучий вид."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "slope",
+          "kind": "grey",
+          "label": {
+            "en": "Slope",
+            "ru": "Склон"
+          },
+          "fallback": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "amount",
+          "kind": "number",
+          "label": {
+            "en": "Amount",
+            "ru": "Сила"
+          },
+          "default": 0.04,
+          "min": 0,
+          "max": 0.2,
+          "step": 0.002
+        },
+        {
+          "id": "mode",
+          "kind": "choice",
+          "label": {
+            "en": "Mode",
+            "ru": "Режим"
+          },
+          "default": "blur",
+          "options": [
+            {
+              "value": "blur",
+              "label": {
+                "en": "Blur",
+                "ru": "Размыть"
+              }
+            },
+            {
+              "value": "min",
+              "label": {
+                "en": "Darkest",
+                "ru": "Темнее"
+              }
+            },
+            {
+              "value": "max",
+              "label": {
+                "en": "Lightest",
+                "ru": "Светлее"
+              }
+            }
+          ]
+        }
+      ],
+      "glsl": "float e = 1. / 256.;\nvec2 g = vec2(inG_slope(uv + vec2(e, 0.)) - inG_slope(uv - vec2(e, 0.)), inG_slope(uv + vec2(0., e)) - inG_slope(uv - vec2(0., e)));\nvec2 dir = length(g) > 1e-5 ? -normalize(g) : vec2(0.);\nvec3 acc = inC_in(uv).rgb; vec3 lo = acc, hi = acc;\nfor (int i = 1; i <= 12; i++) {\n  vec3 c = inC_in(uv + dir * p_amount * float(i) / 12.).rgb;\n  acc += c; lo = min(lo, c); hi = max(hi, c);\n}\noutColor = vec4(p_mode < 0.5 ? acc / 13. : p_mode < 1.5 ? lo : hi, 1.);",
+      "hash": "cee99dd4"
+    },
+    {
+      "type": "distance",
+      "group": "change",
+      "label": {
+        "en": "Distance",
+        "ru": "Расстояние"
+      },
+      "hint": {
+        "en": "A soft edge growing out from white shapes: bevels, glows and wear around marks.",
+        "ru": "Мягкий край вокруг белых фигур: фаски, свечение, износ вокруг отметин."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Shapes",
+            "ru": "Фигуры"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "grey",
+      "params": [
+        {
+          "id": "distance",
+          "kind": "number",
+          "label": {
+            "en": "How far",
+            "ru": "Как далеко"
+          },
+          "default": 0.05,
+          "min": 0.005,
+          "max": 0.25,
+          "step": 0.005
+        }
+      ],
+      "glsl": "float best = inG_in(uv) > 0.5 ? 0. : 1e3;\nfor (int r = 1; r <= 10; r++) {\n  float rad = p_distance * float(r) / 10.;\n  for (int a = 0; a < 16; a++) {\n    float t = float(a) / 16. * 6.2831853 + float(r) * 0.37;\n    if (inG_in(uv + vec2(cos(t), sin(t)) * rad) > 0.5) best = min(best, rad);\n  }\n}\noutColor = vec4(vec3(clamp(1. - best / p_distance, 0., 1.)), 1.);",
+      "hash": "1fc245e1"
+    },
+    {
+      "type": "edges",
+      "group": "change",
+      "label": {
+        "en": "Edge detect",
+        "ru": "Поиск краёв"
+      },
+      "hint": {
+        "en": "White lines where the picture changes sharply: outlines of bricks and shapes.",
+        "ru": "Белые линии там, где картинка резко меняется: контуры кирпичей и фигур."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "grey",
+      "params": [
+        {
+          "id": "width",
+          "kind": "number",
+          "label": {
+            "en": "Width",
+            "ru": "Толщина"
+          },
+          "default": 0.006,
+          "min": 0.001,
+          "max": 0.05,
+          "step": 0.001
+        },
+        {
+          "id": "threshold",
+          "kind": "number",
+          "label": {
+            "en": "Threshold",
+            "ru": "Порог"
+          },
+          "default": 0.1,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "glsl": "float e = abs(inG_in(uv + vec2(p_width, 0.)) - inG_in(uv - vec2(p_width, 0.))) + abs(inG_in(uv + vec2(0., p_width)) - inG_in(uv - vec2(0., p_width)));\noutColor = vec4(vec3(smoothstep(p_threshold, p_threshold + 0.05, e)), 1.);",
+      "hash": "7fe7f100"
+    },
+    {
+      "type": "blend",
+      "group": "combine",
+      "label": {
+        "en": "Blend",
+        "ru": "Смешать"
+      },
+      "hint": {
+        "en": "Put one picture over another: mixed, added, multiplied … and only where a mask is white.",
+        "ru": "Наложить одну картинку на другую: смешать, сложить, умножить … и только там, где маска белая."
+      },
+      "inputs": [
+        {
+          "id": "top",
+          "kind": "color",
+          "label": {
+            "en": "Top",
+            "ru": "Сверху"
+          },
+          "fallback": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "id": "bottom",
+          "kind": "color",
+          "label": {
+            "en": "Bottom",
+            "ru": "Снизу"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "mask",
+          "kind": "grey",
+          "label": {
+            "en": "Mask",
+            "ru": "Маска"
+          },
+          "fallback": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "mode",
+          "kind": "choice",
+          "label": {
+            "en": "Mode",
+            "ru": "Режим"
+          },
+          "default": "mix",
+          "options": [
+            {
+              "value": "mix",
+              "label": {
+                "en": "Mix",
+                "ru": "Смешать"
+              }
+            },
+            {
+              "value": "add",
+              "label": {
+                "en": "Add",
+                "ru": "Сложить"
+              }
+            },
+            {
+              "value": "subtract",
+              "label": {
+                "en": "Subtract",
+                "ru": "Вычесть"
+              }
+            },
+            {
+              "value": "multiply",
+              "label": {
+                "en": "Multiply",
+                "ru": "Умножить"
+              }
+            },
+            {
+              "value": "screen",
+              "label": {
+                "en": "Screen",
+                "ru": "Экран"
+              }
+            },
+            {
+              "value": "overlay",
+              "label": {
+                "en": "Overlay",
+                "ru": "Перекрытие"
+              }
+            },
+            {
+              "value": "max",
+              "label": {
+                "en": "Lighter",
+                "ru": "Светлее"
+              }
+            },
+            {
+              "value": "min",
+              "label": {
+                "en": "Darker",
+                "ru": "Темнее"
+              }
+            },
+            {
+              "value": "difference",
+              "label": {
+                "en": "Difference",
+                "ru": "Разница"
+              }
+            }
+          ]
+        },
+        {
+          "id": "opacity",
+          "kind": "number",
+          "label": {
+            "en": "Opacity",
+            "ru": "Непрозрачность"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "glsl": "vec3 a = inC_top(uv).rgb, b = inC_bottom(uv).rgb; vec3 r;\nint m = int(p_mode + 0.5);\nif (m == 0) r = a; else if (m == 1) r = a + b; else if (m == 2) r = b - a; else if (m == 3) r = a * b;\nelse if (m == 4) r = 1. - (1. - a) * (1. - b);\nelse if (m == 5) r = mix(2. * a * b, 1. - 2. * (1. - a) * (1. - b), step(0.5, b));\nelse if (m == 6) r = max(a, b); else if (m == 7) r = min(a, b); else r = abs(a - b);\noutColor = vec4(clamp(mix(b, r, inG_mask(uv) * p_opacity), 0., 1.), 1.);",
+      "hash": "acd86661"
+    },
+    {
+      "type": "switch",
+      "group": "combine",
+      "label": {
+        "en": "Switch",
+        "ru": "Переключатель"
+      },
+      "hint": {
+        "en": "Pass on one of two inputs (handy for trying a change).",
+        "ru": "Передать один из двух входов (удобно, чтобы сравнить)."
+      },
+      "inputs": [
+        {
+          "id": "a",
+          "kind": "color",
+          "label": {
+            "en": "A",
+            "ru": "А"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "b",
+          "kind": "color",
+          "label": {
+            "en": "B",
+            "ru": "Б"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "useB",
+          "kind": "bool",
+          "label": {
+            "en": "Use B",
+            "ru": "Взять Б"
+          },
+          "default": false
+        }
+      ],
+      "glsl": "outColor = vec4(p_useB > 0.5 ? inC_b(uv).rgb : inC_a(uv).rgb, 1.);",
+      "hash": "cb6cc0ef"
+    },
+    {
+      "type": "gradientMap",
+      "group": "colour",
+      "label": {
+        "en": "Gradient map",
+        "ru": "Карта градиента"
+      },
+      "hint": {
+        "en": "Colour a grey picture: black takes the left colour, white the right.",
+        "ru": "Раскрасить серую картинку: чёрное берёт левый цвет, белое — правый."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "ramp",
+          "kind": "ramp",
+          "label": {
+            "en": "Colours",
+            "ru": "Цвета"
+          },
+          "default": [
+            {
+              "at": 0,
+              "color": "#1e1a16"
+            },
+            {
+              "at": 1,
+              "color": "#e8dcc8"
+            }
+          ]
+        }
+      ],
+      "glsl": "outColor = vec4(ramp(inG_in(uv), p_ramp_c, p_ramp_t, p_ramp_n), 1.);",
+      "hash": "b0ff3b9e"
+    },
+    {
+      "type": "hsl",
+      "group": "colour",
+      "label": {
+        "en": "Hue, saturation, lightness",
+        "ru": "Тон, насыщенность, яркость"
+      },
+      "hint": {
+        "en": "Shift the colours round the wheel, make them stronger or greyer, lighter or darker.",
+        "ru": "Сдвинуть цвета по кругу, сделать насыщеннее или серее, светлее или темнее."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "hue",
+          "kind": "number",
+          "label": {
+            "en": "Hue",
+            "ru": "Тон"
+          },
+          "default": 0,
+          "min": -180,
+          "max": 180,
+          "step": 1
+        },
+        {
+          "id": "saturation",
+          "kind": "number",
+          "label": {
+            "en": "Saturation",
+            "ru": "Насыщенность"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 2
+        },
+        {
+          "id": "lightness",
+          "kind": "number",
+          "label": {
+            "en": "Lightness",
+            "ru": "Яркость"
+          },
+          "default": 0,
+          "min": -1,
+          "max": 1
+        }
+      ],
+      "glsl": "vec3 h = rgb2hsv(inC_in(uv).rgb);\nh.x = fract(h.x + p_hue / 360.); h.y = clamp(h.y * p_saturation, 0., 1.);\noutColor = vec4(clamp(hsv2rgb(h) + p_lightness, 0., 1.), 1.);",
+      "hash": "b733a909"
+    },
+    {
+      "type": "tint",
+      "group": "colour",
+      "label": {
+        "en": "Colourise",
+        "ru": "Окрасить"
+      },
+      "hint": {
+        "en": "Tint a picture with one colour.",
+        "ru": "Окрасить картинку одним цветом."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "color",
+          "kind": "color",
+          "label": {
+            "en": "Colour",
+            "ru": "Цвет"
+          },
+          "default": "#c08040"
+        }
+      ],
+      "glsl": "outColor = vec4(p_color * inG_in(uv), 1.);",
+      "hash": "27cabfba"
+    },
+    {
+      "type": "normal",
+      "group": "surface",
+      "label": {
+        "en": "Height to normal",
+        "ru": "Высота в нормали"
+      },
+      "hint": {
+        "en": "Bumps for lighting from a height picture (white is high).",
+        "ru": "Рельеф для освещения из карты высот (белое — выше)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Height",
+            "ru": "Высота"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "strength",
+          "kind": "number",
+          "label": {
+            "en": "Strength",
+            "ru": "Сила"
+          },
+          "default": 2,
+          "min": 0,
+          "max": 10
+        }
+      ],
+      "glsl": "float e = u_px;\nfloat dx = (inG_in(uv + vec2(e, 0.)) - inG_in(uv - vec2(e, 0.))) / (2. * e);\nfloat dy = (inG_in(uv + vec2(0., e)) - inG_in(uv - vec2(0., e))) / (2. * e);\nvec3 n = normalize(vec3(-dx * p_strength * 0.02, -dy * p_strength * 0.02, 1.));\noutColor = vec4(n * 0.5 + 0.5, 1.);",
+      "hash": "6be334fa"
+    },
+    {
+      "type": "occlusion",
+      "group": "surface",
+      "label": {
+        "en": "Height to occlusion",
+        "ru": "Высота в затенение"
+      },
+      "hint": {
+        "en": "Dark in the dips and cracks, where light hardly reaches.",
+        "ru": "Темнее во впадинах и трещинах, куда свет почти не попадает."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Height",
+            "ru": "Высота"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "grey",
+      "params": [
+        {
+          "id": "radius",
+          "kind": "number",
+          "label": {
+            "en": "Radius",
+            "ru": "Радиус"
+          },
+          "default": 0.02,
+          "min": 0.002,
+          "max": 0.1,
+          "step": 0.001
+        },
+        {
+          "id": "strength",
+          "kind": "number",
+          "label": {
+            "en": "Strength",
+            "ru": "Сила"
+          },
+          "default": 1.5,
+          "min": 0,
+          "max": 4
+        }
+      ],
+      "glsl": "float h = inG_in(uv); float s = 0., w = 0.;\nfor (int y = -2; y <= 2; y++) for (int x = -2; x <= 2; x++) { vec2 o = vec2(x, y) / 2.; float k = exp(-dot(o, o)); s += inG_in(uv + o * p_radius) * k; w += k; }\noutColor = vec4(vec3(clamp(1. - max(s / w - h, 0.) * p_strength * 4., 0., 1.)), 1.);",
+      "hash": "05ae9673"
+    },
+    {
+      "type": "curvature",
+      "group": "surface",
+      "label": {
+        "en": "Height to curvature",
+        "ru": "Высота в кривизну"
+      },
+      "hint": {
+        "en": "Light on ridges and edges, dark in grooves (grey where flat): for wear and dirt masks.",
+        "ru": "Светлее на гребнях и краях, темнее в бороздах (серое — где ровно): для масок износа и грязи."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Height",
+            "ru": "Высота"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "grey",
+      "params": [
+        {
+          "id": "radius",
+          "kind": "number",
+          "label": {
+            "en": "Radius",
+            "ru": "Радиус"
+          },
+          "default": 0.005,
+          "min": 0.001,
+          "max": 0.05,
+          "step": 0.001
+        },
+        {
+          "id": "strength",
+          "kind": "number",
+          "label": {
+            "en": "Strength",
+            "ru": "Сила"
+          },
+          "default": 3,
+          "min": 0,
+          "max": 10
+        }
+      ],
+      "glsl": "float h = inG_in(uv); float r = p_radius;\nfloat lap = 4. * h - inG_in(uv + vec2(r, 0.)) - inG_in(uv - vec2(r, 0.)) - inG_in(uv + vec2(0., r)) - inG_in(uv - vec2(0., r));\noutColor = vec4(vec3(clamp(0.5 + lap * p_strength, 0., 1.)), 1.);",
+      "hash": "5f8328d8"
+    },
+    {
+      "type": "waves",
+      "group": "make",
+      "label": {
+        "en": "Waves and stripes",
+        "ru": "Волны и полосы"
+      },
+      "hint": {
+        "en": "Repeating bands: soft waves, hard stripes, saw or zigzag-like ramps, optionally wobbly.",
+        "ru": "Повторяющиеся полосы: мягкие волны, чёткие полосы, пила или треугольник, можно с волнистостью."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "kind",
+          "kind": "choice",
+          "label": {
+            "en": "Kind",
+            "ru": "Вид"
+          },
+          "default": "sine",
+          "options": [
+            {
+              "value": "sine",
+              "label": {
+                "en": "Waves",
+                "ru": "Волны"
+              }
+            },
+            {
+              "value": "stripes",
+              "label": {
+                "en": "Stripes",
+                "ru": "Полосы"
+              }
+            },
+            {
+              "value": "saw",
+              "label": {
+                "en": "Saw",
+                "ru": "Пила"
+              }
+            },
+            {
+              "value": "triangle",
+              "label": {
+                "en": "Triangle",
+                "ru": "Треугольник"
+              }
+            }
+          ]
+        },
+        {
+          "id": "count",
+          "kind": "int",
+          "label": {
+            "en": "Count",
+            "ru": "Количество"
+          },
+          "default": 8,
+          "min": 1,
+          "max": 64
+        },
+        {
+          "id": "direction",
+          "kind": "choice",
+          "label": {
+            "en": "Direction",
+            "ru": "Направление"
+          },
+          "default": "down",
+          "options": [
+            {
+              "value": "across",
+              "label": {
+                "en": "Across",
+                "ru": "Поперёк"
+              }
+            },
+            {
+              "value": "down",
+              "label": {
+                "en": "Down",
+                "ru": "Вниз"
+              }
+            },
+            {
+              "value": "diagonal",
+              "label": {
+                "en": "Diagonal",
+                "ru": "По диагонали"
+              }
+            }
+          ]
+        },
+        {
+          "id": "sharpness",
+          "kind": "number",
+          "label": {
+            "en": "Sharpness",
+            "ru": "Чёткость"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "wobble",
+          "kind": "number",
+          "label": {
+            "en": "Wobble",
+            "ru": "Волнистость"
+          },
+          "default": 0,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "wobbleScale",
+          "kind": "int",
+          "label": {
+            "en": "Wobble size",
+            "ru": "Размер волнистости"
+          },
+          "default": 3,
+          "min": 1,
+          "max": 16
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "float t = p_direction < 0.5 ? uv.x : p_direction < 1.5 ? uv.y : uv.x + uv.y;\nt += (fbm(uv, p_wobbleScale, 4., 0.5, 0., p_seed) - 0.5) * p_wobble * 2. / max(p_count, 1.);\nfloat x = fract(t * p_count); int k = int(p_kind + 0.5); float v;\nif (k == 0) v = 0.5 + 0.5 * sin(x * 6.2831853);\nelse if (k == 1) v = 0.5 + 0.5 * sin(x * 6.2831853);\nelse if (k == 2) v = x;\nelse v = 1. - abs(x * 2. - 1.);\nfloat e = k == 1 ? (1. - p_sharpness) * 0.45 + 0.01 : (1. - p_sharpness) * 0.5 + 0.02;\nif (k == 1 || p_sharpness > 0.) v = mix(v, smoothstep(0.5 - e, 0.5 + e, v), k == 1 ? 1. : p_sharpness);\noutColor = vec4(vec3(v), 1.);",
+      "hash": "f0b4de79"
+    },
+    {
+      "type": "hexagons",
+      "group": "make",
+      "label": {
+        "en": "Hexagons",
+        "ru": "Шестиугольники"
+      },
+      "hint": {
+        "en": "Hexagonal tiles with gaps between them (white tile, black gap).",
+        "ru": "Шестиугольная плитка со швами (белое — плитка, чёрное — шов)."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "scale",
+          "kind": "int",
+          "label": {
+            "en": "Across",
+            "ru": "В ряд"
+          },
+          "default": 6,
+          "min": 2,
+          "max": 48
+        },
+        {
+          "id": "gap",
+          "kind": "number",
+          "label": {
+            "en": "Gap",
+            "ru": "Шов"
+          },
+          "default": 0.06,
+          "min": 0,
+          "max": 0.4
+        },
+        {
+          "id": "bevel",
+          "kind": "number",
+          "label": {
+            "en": "Bevel",
+            "ru": "Скос"
+          },
+          "default": 0.15,
+          "min": 0,
+          "max": 0.5
+        },
+        {
+          "id": "random",
+          "kind": "number",
+          "label": {
+            "en": "Random brightness",
+            "ru": "Разная яркость"
+          },
+          "default": 0.3,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "float N = p_scale; float M = max(1., floor(N / 1.7320508 + 0.5));\nvec2 p = vec2(uv.x * N, uv.y * M * 1.7320508);\nvec2 r = vec2(1., 1.7320508); vec2 hh = r * 0.5;\nvec2 a = mod(p, r) - hh; vec2 b = mod(p - hh, r) - hh;\nvec2 g = dot(a, a) < dot(b, b) ? a : b;\nvec2 cid = p - g;\nvec2 q = abs(g); float d = max(q.x, dot(q, vec2(0.5, 0.8660254)));\nfloat edge = 0.5 - d - p_gap * 0.5;\nfloat rnd = hash12(floor(mod(cid + 0.01, vec2(N, M * 1.7320508)) * 4.) + seedv(p_seed));\nfloat v = edge <= 0. ? 0. : (p_bevel > 0. ? smoothstep(0., p_bevel * 0.5, edge) : 1.) * (1. - p_random * rnd);\noutColor = vec4(vec3(v), 1.);",
+      "hash": "f201d517"
+    },
+    {
+      "type": "weave",
+      "group": "make",
+      "label": {
+        "en": "Weave",
+        "ru": "Плетение"
+      },
+      "hint": {
+        "en": "Threads woven over and under each other: cloth, baskets, wicker (as height).",
+        "ru": "Нити, переплетённые сверху и снизу: ткань, корзины (как высота)."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "threads",
+          "kind": "int",
+          "label": {
+            "en": "Threads",
+            "ru": "Нитей"
+          },
+          "default": 8,
+          "min": 2,
+          "max": 64
+        },
+        {
+          "id": "width",
+          "kind": "number",
+          "label": {
+            "en": "Thread width",
+            "ru": "Толщина нити"
+          },
+          "default": 0.8,
+          "min": 0.3,
+          "max": 1
+        }
+      ],
+      "glsl": "vec2 p = uv * p_threads; vec2 c = floor(p); vec2 f = fract(p) - 0.5;\nfloat over = mod(c.x + c.y, 2.); float w = p_width * 0.5;\nfloat hT = 1. - smoothstep(w - 0.08, w, abs(f.y)); float vT = 1. - smoothstep(w - 0.08, w, abs(f.x));\nfloat hH = hT * (0.65 + 0.35 * cos(f.x * 3.14159)); float vH = vT * (0.65 + 0.35 * cos(f.y * 3.14159));\nfloat v = over > 0.5 ? max(hH, vH * 0.55) : max(vH, hH * 0.55);\noutColor = vec4(vec3(v), 1.);",
+      "hash": "3a7ad79b"
+    },
+    {
+      "type": "planks",
+      "group": "make",
+      "label": {
+        "en": "Planks",
+        "ru": "Доски"
+      },
+      "hint": {
+        "en": "Rows of boards of staggered lengths with gaps, each a little different, with grain.",
+        "ru": "Ряды досок разной длины со щелями, каждая чуть другая, с волокнами."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "rows",
+          "kind": "int",
+          "label": {
+            "en": "Rows",
+            "ru": "Рядов"
+          },
+          "default": 6,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "id": "lengths",
+          "kind": "int",
+          "label": {
+            "en": "Boards per row",
+            "ru": "Досок в ряду"
+          },
+          "default": 2,
+          "min": 1,
+          "max": 8
+        },
+        {
+          "id": "gap",
+          "kind": "number",
+          "label": {
+            "en": "Gap",
+            "ru": "Щель"
+          },
+          "default": 0.03,
+          "min": 0,
+          "max": 0.2
+        },
+        {
+          "id": "random",
+          "kind": "number",
+          "label": {
+            "en": "Random brightness",
+            "ru": "Разная яркость"
+          },
+          "default": 0.35,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "grain",
+          "kind": "number",
+          "label": {
+            "en": "Grain",
+            "ru": "Волокна"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "float y = uv.y * p_rows; float row = floor(y); float fy = fract(y);\nfloat sh = hash12(vec2(mod(row, p_rows), 3.) + seedv(p_seed));\nfloat x = uv.x * p_lengths + sh; float col = floor(x); float fx = fract(x);\nfloat dGap = min(min(fy, 1. - fy), min(fx, 1. - fx) * p_rows / p_lengths);\nfloat board = smoothstep(p_gap * 0.5, p_gap * 0.5 + 0.03, dGap);\nfloat r = hash12(vec2(mod(col, p_lengths), mod(row, p_rows)) + seedv(p_seed) + 5.);\nfloat g = 0.5 + 0.5 * sin((fy * 7. + fbm(uv, 8., 4., 0.5, 0., p_seed + r * 7.) * 3.) * 6.2831853);\noutColor = vec4(vec3(board * (1. - p_random * r) * mix(1., 0.72 + 0.28 * g, p_grain)), 1.);",
+      "hash": "5c95cd24"
+    },
+    {
+      "type": "woodGrain",
+      "group": "make",
+      "label": {
+        "en": "Wood grain",
+        "ru": "Древесина"
+      },
+      "hint": {
+        "en": "Growth rings bent by noise, like sawn wood.",
+        "ru": "Годовые кольца, изогнутые шумом, как у распиленного дерева."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "rings",
+          "kind": "int",
+          "label": {
+            "en": "Rings",
+            "ru": "Колец"
+          },
+          "default": 8,
+          "min": 1,
+          "max": 48
+        },
+        {
+          "id": "distortion",
+          "kind": "number",
+          "label": {
+            "en": "Distortion",
+            "ru": "Искривление"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "scale",
+          "kind": "int",
+          "label": {
+            "en": "Noise size",
+            "ru": "Размер шума"
+          },
+          "default": 3,
+          "min": 1,
+          "max": 16
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "float n = fbm(uv, p_scale, 5., 0.55, 0., p_seed);\nfloat t = uv.y * p_rings + n * p_distortion * 4.;\nfloat v = pow(0.5 + 0.5 * sin(t * 6.2831853), 3.);\noutColor = vec4(vec3(1. - v * 0.8), 1.);",
+      "hash": "6cdf0493"
+    },
+    {
+      "type": "cobblestones",
+      "group": "make",
+      "label": {
+        "en": "Cobblestones",
+        "ru": "Булыжник"
+      },
+      "hint": {
+        "en": "Rounded stones packed together with gaps (as height).",
+        "ru": "Округлые камни вплотную со швами (как высота)."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "scale",
+          "kind": "int",
+          "label": {
+            "en": "Scale",
+            "ru": "Масштаб"
+          },
+          "default": 7,
+          "min": 2,
+          "max": 48
+        },
+        {
+          "id": "gap",
+          "kind": "number",
+          "label": {
+            "en": "Gap",
+            "ru": "Шов"
+          },
+          "default": 0.05,
+          "min": 0,
+          "max": 0.3
+        },
+        {
+          "id": "bevel",
+          "kind": "number",
+          "label": {
+            "en": "Roundness",
+            "ru": "Округлость"
+          },
+          "default": 0.6,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "random",
+          "kind": "number",
+          "label": {
+            "en": "Random brightness",
+            "ru": "Разная яркость"
+          },
+          "default": 0.3,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "vec3 v = voronoi(uv, p_scale, 0.9, p_seed);\nfloat d = (v.y - v.x) * 0.5 - p_gap * 0.5;\nfloat h = d <= 0. ? 0. : smoothstep(0., p_bevel * 0.4 + 1e-3, d);\noutColor = vec4(vec3(h * (1. - p_random * v.z)), 1.);",
+      "hash": "dfee0f68"
+    },
+    {
+      "type": "cracks",
+      "group": "make",
+      "label": {
+        "en": "Cracks",
+        "ru": "Трещины"
+      },
+      "hint": {
+        "en": "A network of thin wandering cracks (white): dry mud, old paint, broken stone.",
+        "ru": "Сеть тонких извилистых трещин (белое): сухая грязь, старая краска, камень."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "scale",
+          "kind": "int",
+          "label": {
+            "en": "Scale",
+            "ru": "Масштаб"
+          },
+          "default": 6,
+          "min": 2,
+          "max": 48
+        },
+        {
+          "id": "width",
+          "kind": "number",
+          "label": {
+            "en": "Width",
+            "ru": "Ширина"
+          },
+          "default": 0.25,
+          "min": 0.01,
+          "max": 1
+        },
+        {
+          "id": "distortion",
+          "kind": "number",
+          "label": {
+            "en": "Wander",
+            "ru": "Извилистость"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "vec2 w = vec2(fbm(uv, 4., 4., 0.5, 0., p_seed + 11.), fbm(uv, 4., 4., 0.5, 0., p_seed + 23.)) - 0.5;\nvec3 v = voronoi(fract(uv + w * p_distortion * 0.25), p_scale, 1., p_seed);\noutColor = vec4(vec3(1. - smoothstep(0., p_width * 0.1 + 1e-3, v.y - v.x)), 1.);",
+      "hash": "bfe04a76"
+    },
+    {
+      "type": "marble",
+      "group": "make",
+      "label": {
+        "en": "Marble",
+        "ru": "Мрамор"
+      },
+      "hint": {
+        "en": "Veins swirled through stone.",
+        "ru": "Прожилки, закрученные в камне."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "veins",
+          "kind": "int",
+          "label": {
+            "en": "Veins",
+            "ru": "Прожилок"
+          },
+          "default": 3,
+          "min": 1,
+          "max": 16
+        },
+        {
+          "id": "turbulence",
+          "kind": "number",
+          "label": {
+            "en": "Turbulence",
+            "ru": "Завихрения"
+          },
+          "default": 0.6,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "scale",
+          "kind": "int",
+          "label": {
+            "en": "Noise size",
+            "ru": "Размер шума"
+          },
+          "default": 3,
+          "min": 1,
+          "max": 16
+        },
+        {
+          "id": "sharpness",
+          "kind": "number",
+          "label": {
+            "en": "Thin veins",
+            "ru": "Тонкие прожилки"
+          },
+          "default": 0.6,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "float n = fbm(uv, p_scale, 6., 0.55, 0., p_seed);\nfloat t = (uv.x + uv.y) * p_veins + (n - 0.5) * p_turbulence * 3.;\nfloat v = pow(1. - abs(sin(t * 3.14159265)), mix(1., 6., p_sharpness));\noutColor = vec4(vec3(v), 1.);",
+      "hash": "d59c3b35"
+    },
+    {
+      "type": "blobs",
+      "group": "make",
+      "label": {
+        "en": "Blobs",
+        "ru": "Пятна"
+      },
+      "hint": {
+        "en": "Soft or sharp random patches covering as much as you say: rust spots, puddles, moss.",
+        "ru": "Мягкие или чёткие случайные пятна нужной площади: ржавчина, лужи, мох."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "scale",
+          "kind": "int",
+          "label": {
+            "en": "Scale",
+            "ru": "Масштаб"
+          },
+          "default": 4,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "id": "coverage",
+          "kind": "number",
+          "label": {
+            "en": "Coverage",
+            "ru": "Покрытие"
+          },
+          "default": 0.4,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "softness",
+          "kind": "number",
+          "label": {
+            "en": "Softness",
+            "ru": "Мягкость"
+          },
+          "default": 0.2,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "float n = fbm(uv, p_scale, 5., 0.5, 0., p_seed);\nfloat e = 1. - p_coverage; float s = p_softness * 0.2 + 0.005;\noutColor = vec4(vec3(smoothstep(e - s, e + s, n)), 1.);",
+      "hash": "0782be38"
+    },
+    {
+      "type": "speckles",
+      "group": "make",
+      "label": {
+        "en": "Speckles",
+        "ru": "Крапинки"
+      },
+      "hint": {
+        "en": "Small random dots: gravel, terrazzo, stars, dust.",
+        "ru": "Мелкие случайные точки: гравий, терраццо, звёзды, пыль."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "density",
+          "kind": "int",
+          "label": {
+            "en": "Grid",
+            "ru": "Сетка"
+          },
+          "default": 24,
+          "min": 4,
+          "max": 256
+        },
+        {
+          "id": "amount",
+          "kind": "number",
+          "label": {
+            "en": "Amount",
+            "ru": "Сколько"
+          },
+          "default": 0.35,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "size",
+          "kind": "number",
+          "label": {
+            "en": "Size",
+            "ru": "Размер"
+          },
+          "default": 0.7,
+          "min": 0.05,
+          "max": 1
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "vec2 p = uv * p_density; vec2 c = floor(p); vec2 f = fract(p);\nvec2 o = seedv(p_seed); vec2 cm = mod(c, p_density);\nfloat has = step(1. - p_amount, hash12(cm + o));\nvec2 at = 0.25 + 0.5 * hash22(cm + o + 3.1);\nfloat r = p_size * 0.3 * (0.5 + hash12(cm + o + 9.2));\nfloat v = has * (1. - smoothstep(r * 0.6, r, length(f - at)));\noutColor = vec4(vec3(v), 1.);",
+      "hash": "eb0d1bc8"
+    },
+    {
+      "type": "scatter",
+      "group": "make",
+      "label": {
+        "en": "Scatter",
+        "ru": "Разброс"
+      },
+      "hint": {
+        "en": "Copies of a picture scattered over the square, each a different size, turn and brightness: leaves, pebbles, bolts.",
+        "ru": "Копии картинки, разбросанные по квадрату, разного размера, поворота и яркости: листья, камешки, болты."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "Picture",
+            "ru": "Картинка"
+          },
+          "fallback": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "count",
+          "kind": "int",
+          "label": {
+            "en": "Per row",
+            "ru": "В ряду"
+          },
+          "default": 6,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "id": "size",
+          "kind": "number",
+          "label": {
+            "en": "Size",
+            "ru": "Размер"
+          },
+          "default": 0.6,
+          "min": 0.05,
+          "max": 2
+        },
+        {
+          "id": "sizeRandom",
+          "kind": "number",
+          "label": {
+            "en": "Size varies",
+            "ru": "Разный размер"
+          },
+          "default": 0.4,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "turn",
+          "kind": "number",
+          "label": {
+            "en": "Turn varies",
+            "ru": "Разный поворот"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "brightRandom",
+          "kind": "number",
+          "label": {
+            "en": "Brightness varies",
+            "ru": "Разная яркость"
+          },
+          "default": 0.3,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "apart",
+          "kind": "bool",
+          "label": {
+            "en": "Keep apart",
+            "ru": "Не пересекать"
+          },
+          "default": false
+        },
+        {
+          "id": "margin",
+          "kind": "number",
+          "label": {
+            "en": "Space between",
+            "ru": "Промежуток"
+          },
+          "default": 0.05,
+          "min": 0,
+          "max": 0.5
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "vec2 p = uv * p_count; vec2 c = floor(p); float best = 0.; vec3 col = vec3(0.); vec2 o = seedv(p_seed);\n// Keep apart: each copy stays inside its own cell (its turned corners too, plus the space between), so none touch.\nfloat reach = p_turn > 0. ? 0.70711 : 0.5;\nfloat room = max(0., 1. - p_margin);\nfor (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {\n  vec2 cc = c + vec2(float(x), float(y)); vec2 cm = mod(cc, p_count);\n  if (p_apart > 0.5 && (x != 0 || y != 0)) continue;\n  float s = p_size * (1. - p_sizeRandom * hash12(cm + o + 1.7));\n  if (p_apart > 0.5) s = min(s, room / (2. * reach));\n  float slack = p_apart > 0.5 ? max(0., room - 2. * reach * s) : 0.8;\n  vec2 ctr = cc + 0.5 + (hash22(cm + o) - 0.5) * slack;\n  float a = hash12(cm + o + 4.4) * 6.2831853 * p_turn;\n  vec2 d = mat2(cos(a), -sin(a), sin(a), cos(a)) * ((p - ctr) / max(s, 1e-3));\n  if (abs(d.x) < 0.5 && abs(d.y) < 0.5) {\n    vec3 t = inC_in(d + 0.5).rgb * (1. - p_brightRandom * hash12(cm + o + 8.8));\n    float g = dot(t, vec3(0.3333));\n    if (g > best) { best = g; col = t; }\n  }\n}\noutColor = vec4(col, 1.);",
+      "hash": "74a004bd"
+    },
+    {
+      "type": "zigzag",
+      "group": "make",
+      "label": {
+        "en": "Zigzag",
+        "ru": "Зигзаг"
+      },
+      "hint": {
+        "en": "Chevron stripes (herringbone-like bands).",
+        "ru": "Полосы-ёлочки (шевроны)."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "count",
+          "kind": "int",
+          "label": {
+            "en": "Count",
+            "ru": "Количество"
+          },
+          "default": 6,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "id": "amount",
+          "kind": "number",
+          "label": {
+            "en": "Zig size",
+            "ru": "Размах"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 2
+        },
+        {
+          "id": "direction",
+          "kind": "choice",
+          "label": {
+            "en": "Direction",
+            "ru": "Направление"
+          },
+          "default": "down",
+          "options": [
+            {
+              "value": "down",
+              "label": {
+                "en": "Down",
+                "ru": "Вниз"
+              }
+            },
+            {
+              "value": "across",
+              "label": {
+                "en": "Across",
+                "ru": "Поперёк"
+              }
+            }
+          ]
+        },
+        {
+          "id": "sharpness",
+          "kind": "number",
+          "label": {
+            "en": "Sharpness",
+            "ru": "Чёткость"
+          },
+          "default": 0.8,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "glsl": "vec2 q = p_direction < 0.5 ? uv : uv.yx;\nfloat t = q.y * p_count + p_amount * (1. - abs(fract(q.x * p_count) * 2. - 1.));\nfloat s = 0.5 + 0.5 * sin(t * 6.2831853); float e = (1. - p_sharpness) * 0.5 + 0.01;\noutColor = vec4(vec3(smoothstep(0.5 - e, 0.5 + e, s)), 1.);",
+      "hash": "4033a35d"
+    },
+    {
+      "type": "sharpen",
+      "group": "change",
+      "label": {
+        "en": "Sharpen",
+        "ru": "Резкость"
+      },
+      "hint": {
+        "en": "Crisper details: edges pushed apart.",
+        "ru": "Чётче детали: края усилены."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "amount",
+          "kind": "number",
+          "label": {
+            "en": "Amount",
+            "ru": "Сила"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 4
+        },
+        {
+          "id": "radius",
+          "kind": "number",
+          "label": {
+            "en": "Radius",
+            "ru": "Радиус"
+          },
+          "default": 0.004,
+          "min": 0.001,
+          "max": 0.02,
+          "step": 0.001
+        }
+      ],
+      "glsl": "vec3 c = inC_in(uv).rgb; float r = p_radius;\nvec3 b = (inC_in(uv + vec2(r, 0.)).rgb + inC_in(uv - vec2(r, 0.)).rgb + inC_in(uv + vec2(0., r)).rgb + inC_in(uv - vec2(0., r)).rgb) * 0.25;\noutColor = vec4(clamp(c + (c - b) * p_amount, 0., 1.), 1.);",
+      "hash": "f8619346"
+    },
+    {
+      "type": "posterize",
+      "group": "change",
+      "label": {
+        "en": "Posterize",
+        "ru": "Постеризация"
+      },
+      "hint": {
+        "en": "Fewer shades: hard steps instead of smooth changes (good for stylized looks).",
+        "ru": "Меньше оттенков: ступеньки вместо плавных переходов (для стилизации)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "steps",
+          "kind": "int",
+          "label": {
+            "en": "Steps",
+            "ru": "Ступеней"
+          },
+          "default": 4,
+          "min": 2,
+          "max": 32
+        }
+      ],
+      "glsl": "outColor = vec4(min(floor(inC_in(uv).rgb * p_steps), vec3(p_steps - 1.)) / max(p_steps - 1., 1.), 1.);",
+      "hash": "6b194cd0"
+    },
+    {
+      "type": "threshold",
+      "group": "change",
+      "label": {
+        "en": "Threshold",
+        "ru": "Порог"
+      },
+      "hint": {
+        "en": "Black below a level, white above, with a soft or hard step between: turn any grey into a mask.",
+        "ru": "Чёрное ниже уровня, белое выше, с мягким или резким переходом: сделать маску из любого серого."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "grey",
+      "params": [
+        {
+          "id": "position",
+          "kind": "number",
+          "label": {
+            "en": "Level",
+            "ru": "Уровень"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "contrast",
+          "kind": "number",
+          "label": {
+            "en": "Hardness",
+            "ru": "Резкость"
+          },
+          "default": 0.8,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "glsl": "float w = (1. - p_contrast) * 0.5 + 0.002;\noutColor = vec4(vec3(smoothstep(p_position - w, p_position + w, inG_in(uv))), 1.);",
+      "hash": "ea11a658"
+    },
+    {
+      "type": "brightness",
+      "group": "change",
+      "label": {
+        "en": "Brightness and contrast",
+        "ru": "Яркость и контраст"
+      },
+      "hint": {
+        "en": "Lighter or darker, more or less contrast, and gamma (mid-tones).",
+        "ru": "Светлее или темнее, больше или меньше контраста, и гамма (средние тона)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "brightness",
+          "kind": "number",
+          "label": {
+            "en": "Brightness",
+            "ru": "Яркость"
+          },
+          "default": 0,
+          "min": -1,
+          "max": 1
+        },
+        {
+          "id": "contrast",
+          "kind": "number",
+          "label": {
+            "en": "Contrast",
+            "ru": "Контраст"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 3
+        },
+        {
+          "id": "gamma",
+          "kind": "number",
+          "label": {
+            "en": "Gamma",
+            "ru": "Гамма"
+          },
+          "default": 1,
+          "min": 0.2,
+          "max": 5
+        }
+      ],
+      "glsl": "vec3 c = (inC_in(uv).rgb - 0.5) * p_contrast + 0.5 + p_brightness;\noutColor = vec4(pow(clamp(c, 0., 1.), vec3(1. / p_gamma)), 1.);",
+      "hash": "c200ab6e"
+    },
+    {
+      "type": "mirror",
+      "group": "change",
+      "label": {
+        "en": "Mirror",
+        "ru": "Зеркало"
+      },
+      "hint": {
+        "en": "Make the picture symmetric: left matches right, top matches bottom, or both.",
+        "ru": "Сделать картинку симметричной: слева как справа, сверху как снизу, или оба."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "mode",
+          "kind": "choice",
+          "label": {
+            "en": "Mirror",
+            "ru": "Отразить"
+          },
+          "default": "across",
+          "options": [
+            {
+              "value": "across",
+              "label": {
+                "en": "Left–right",
+                "ru": "Слева–справа"
+              }
+            },
+            {
+              "value": "down",
+              "label": {
+                "en": "Top–bottom",
+                "ru": "Сверху–снизу"
+              }
+            },
+            {
+              "value": "both",
+              "label": {
+                "en": "Both",
+                "ru": "Оба"
+              }
+            }
+          ]
+        }
+      ],
+      "glsl": "vec2 q = uv;\nif (p_mode < 0.5 || p_mode > 1.5) q.x = 0.5 - abs(uv.x - 0.5);\nif (p_mode > 0.5) q.y = 0.5 - abs(uv.y - 0.5);\noutColor = vec4(inC_in(q).rgb, 1.);",
+      "hash": "06e94c6b"
+    },
+    {
+      "type": "pixelate",
+      "group": "change",
+      "label": {
+        "en": "Pixelate",
+        "ru": "Пикселизация"
+      },
+      "hint": {
+        "en": "Big square pixels (retro look).",
+        "ru": "Крупные квадратные пиксели (ретро)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "cells",
+          "kind": "int",
+          "label": {
+            "en": "Pixels across",
+            "ru": "Пикселей в ряд"
+          },
+          "default": 32,
+          "min": 2,
+          "max": 256
+        }
+      ],
+      "glsl": "outColor = vec4(inC_in((floor(uv * p_cells) + 0.5) / p_cells).rgb, 1.);",
+      "hash": "3314f39c"
+    },
+    {
+      "type": "swirl",
+      "group": "change",
+      "label": {
+        "en": "Swirl",
+        "ru": "Завихрение"
+      },
+      "hint": {
+        "en": "Twist the middle of the picture round (the edges stay put, so it still tiles).",
+        "ru": "Закрутить середину картинки (края на месте, так что плитка стыкуется)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "amount",
+          "kind": "number",
+          "label": {
+            "en": "Twist",
+            "ru": "Закрутка"
+          },
+          "default": 3,
+          "min": -10,
+          "max": 10
+        },
+        {
+          "id": "radius",
+          "kind": "number",
+          "label": {
+            "en": "Radius",
+            "ru": "Радиус"
+          },
+          "default": 0.45,
+          "min": 0.05,
+          "max": 0.5
+        }
+      ],
+      "glsl": "vec2 d = uv - 0.5; float t = clamp(1. - length(d) / p_radius, 0., 1.); float a = p_amount * t * t;\noutColor = vec4(inC_in(0.5 + mat2(cos(a), -sin(a), sin(a), cos(a)) * d).rgb, 1.);",
+      "hash": "d6f0a9e6"
+    },
+    {
+      "type": "outline",
+      "group": "change",
+      "label": {
+        "en": "Outline",
+        "ru": "Контур"
+      },
+      "hint": {
+        "en": "White where brightness changes quickly: the edges of shapes.",
+        "ru": "Белое там, где яркость резко меняется: края фигур."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "grey",
+      "params": [
+        {
+          "id": "strength",
+          "kind": "number",
+          "label": {
+            "en": "Strength",
+            "ru": "Сила"
+          },
+          "default": 2,
+          "min": 0,
+          "max": 10
+        },
+        {
+          "id": "radius",
+          "kind": "number",
+          "label": {
+            "en": "Radius",
+            "ru": "Радиус"
+          },
+          "default": 0.003,
+          "min": 0.001,
+          "max": 0.02,
+          "step": 0.001
+        }
+      ],
+      "glsl": "float r = p_radius;\nfloat tl = inG_in(uv + vec2(-r, -r)), tc = inG_in(uv + vec2(0., -r)), tr = inG_in(uv + vec2(r, -r));\nfloat ml = inG_in(uv + vec2(-r, 0.)), mr = inG_in(uv + vec2(r, 0.));\nfloat bl = inG_in(uv + vec2(-r, r)), bc = inG_in(uv + vec2(0., r)), br = inG_in(uv + vec2(r, r));\nfloat gx = tr + 2. * mr + br - tl - 2. * ml - bl; float gy = bl + 2. * bc + br - tl - 2. * tc - tr;\noutColor = vec4(vec3(clamp(length(vec2(gx, gy)) * p_strength, 0., 1.)), 1.);",
+      "hash": "e0699b21"
+    },
+    {
+      "type": "motionBlur",
+      "group": "change",
+      "label": {
+        "en": "Directional blur",
+        "ru": "Размытие в движении"
+      },
+      "hint": {
+        "en": "Smear the picture one way: streaks, brushed metal, rain.",
+        "ru": "Смазать картинку в одну сторону: потёки, шлифованный металл, дождь."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "angle",
+          "kind": "number",
+          "label": {
+            "en": "Direction",
+            "ru": "Направление"
+          },
+          "default": 90,
+          "min": 0,
+          "max": 360,
+          "step": 1
+        },
+        {
+          "id": "length",
+          "kind": "number",
+          "label": {
+            "en": "Length",
+            "ru": "Длина"
+          },
+          "default": 0.04,
+          "min": 0,
+          "max": 0.25,
+          "step": 0.002
+        }
+      ],
+      "glsl": "vec2 dir = vec2(cos(radians(p_angle)), sin(radians(p_angle))) * p_length;\nvec3 s = vec3(0.); for (int k = -8; k <= 8; k++) s += inC_in(uv + dir * float(k) / 8.).rgb;\noutColor = vec4(s / 17., 1.);",
+      "hash": "30d2bfbb"
+    },
+    {
+      "type": "emboss",
+      "group": "change",
+      "label": {
+        "en": "Light from height",
+        "ru": "Свет по высоте"
+      },
+      "hint": {
+        "en": "Light a height picture from one side: bright slopes face the light (a quick preview or stylized shading).",
+        "ru": "Осветить карту высот с одной стороны: склоны к свету светлее (быстрый просмотр или стилизованные тени)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Height",
+            "ru": "Высота"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "grey",
+      "params": [
+        {
+          "id": "angle",
+          "kind": "number",
+          "label": {
+            "en": "Light from",
+            "ru": "Свет с"
+          },
+          "default": 225,
+          "min": 0,
+          "max": 360,
+          "step": 1
+        },
+        {
+          "id": "elevation",
+          "kind": "number",
+          "label": {
+            "en": "Light height",
+            "ru": "Высота света"
+          },
+          "default": 40,
+          "min": 5,
+          "max": 85,
+          "step": 1
+        },
+        {
+          "id": "strength",
+          "kind": "number",
+          "label": {
+            "en": "Strength",
+            "ru": "Сила"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 4
+        }
+      ],
+      "glsl": "float e = 1. / 256.;\nvec2 g = vec2(inG_in(uv + vec2(e, 0.)) - inG_in(uv - vec2(e, 0.)), inG_in(uv + vec2(0., e)) - inG_in(uv - vec2(0., e))) * p_strength * 32.;\nvec3 n = normalize(vec3(-g, 1.)); float el = radians(p_elevation), az = radians(p_angle);\nvec3 L = vec3(cos(az) * cos(el), sin(az) * cos(el), sin(el));\noutColor = vec4(vec3(clamp(dot(n, L), 0., 1.)), 1.);",
+      "hash": "db3373bb"
+    },
+    {
+      "type": "math",
+      "group": "combine",
+      "label": {
+        "en": "Math",
+        "ru": "Математика"
+      },
+      "hint": {
+        "en": "Combine two greys with a sum: add, subtract, multiply, divide, min, max, power … (B is the number when not linked).",
+        "ru": "Совместить два серых: сложить, вычесть, умножить, разделить, мин, макс, степень … (Б — число, если не подключено)."
+      },
+      "inputs": [
+        {
+          "id": "a",
+          "kind": "grey",
+          "label": {
+            "en": "A",
+            "ru": "А"
+          },
+          "fallback": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "id": "b",
+          "kind": "grey",
+          "label": {
+            "en": "B",
+            "ru": "Б"
+          },
+          "fallback": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "output": "grey",
+      "params": [
+        {
+          "id": "op",
+          "kind": "choice",
+          "label": {
+            "en": "Sum",
+            "ru": "Действие"
+          },
+          "default": "mul",
+          "options": [
+            {
+              "value": "add",
+              "label": {
+                "en": "A + B",
+                "ru": "А + Б"
+              }
+            },
+            {
+              "value": "sub",
+              "label": {
+                "en": "A − B",
+                "ru": "А − Б"
+              }
+            },
+            {
+              "value": "mul",
+              "label": {
+                "en": "A × B",
+                "ru": "А × Б"
+              }
+            },
+            {
+              "value": "div",
+              "label": {
+                "en": "A ÷ B",
+                "ru": "А ÷ Б"
+              }
+            },
+            {
+              "value": "min",
+              "label": {
+                "en": "Smaller",
+                "ru": "Меньшее"
+              }
+            },
+            {
+              "value": "max",
+              "label": {
+                "en": "Larger",
+                "ru": "Большее"
+              }
+            },
+            {
+              "value": "pow",
+              "label": {
+                "en": "A to the power B",
+                "ru": "А в степени Б"
+              }
+            },
+            {
+              "value": "diff",
+              "label": {
+                "en": "Difference",
+                "ru": "Разница"
+              }
+            },
+            {
+              "value": "avg",
+              "label": {
+                "en": "Average",
+                "ru": "Среднее"
+              }
+            }
+          ]
+        },
+        {
+          "id": "value",
+          "kind": "number",
+          "label": {
+            "en": "B (when not linked)",
+            "ru": "Б (без связи)"
+          },
+          "default": 1,
+          "min": -1,
+          "max": 4
+        }
+      ],
+      "glsl": "float a = inG_a(uv); float b = h_b > 0.5 ? inG_b(uv) : p_value; int m = int(p_op + 0.5); float r;\nif (m == 0) r = a + b; else if (m == 1) r = a - b; else if (m == 2) r = a * b; else if (m == 3) r = a / max(abs(b), 1e-4) * sign(b + 1e-9);\nelse if (m == 4) r = min(a, b); else if (m == 5) r = max(a, b); else if (m == 6) r = pow(max(a, 0.), b); else if (m == 7) r = abs(a - b); else r = (a + b) * 0.5;\noutColor = vec4(vec3(clamp(r, 0., 1.)), 1.);",
+      "hash": "879ba4a3"
+    },
+    {
+      "type": "heightBlend",
+      "group": "combine",
+      "label": {
+        "en": "Height blend",
+        "ru": "Смешать по высоте"
+      },
+      "hint": {
+        "en": "Two materials meet by height: the higher one shows (sand between stones, moss in cracks, paint chipping off).",
+        "ru": "Два материала встречаются по высоте: видно более высокий (песок между камнями, мох в трещинах, облупившаяся краска)."
+      },
+      "inputs": [
+        {
+          "id": "top",
+          "kind": "color",
+          "label": {
+            "en": "Top colour",
+            "ru": "Верхний цвет"
+          },
+          "fallback": [
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "id": "heightTop",
+          "kind": "grey",
+          "label": {
+            "en": "Top height",
+            "ru": "Верхняя высота"
+          },
+          "fallback": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        },
+        {
+          "id": "bottom",
+          "kind": "color",
+          "label": {
+            "en": "Bottom colour",
+            "ru": "Нижний цвет"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "heightBottom",
+          "kind": "grey",
+          "label": {
+            "en": "Bottom height",
+            "ru": "Нижняя высота"
+          },
+          "fallback": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "offset",
+          "kind": "number",
+          "label": {
+            "en": "Top raised by",
+            "ru": "Поднять верхний на"
+          },
+          "default": 0,
+          "min": -1,
+          "max": 1
+        },
+        {
+          "id": "contrast",
+          "kind": "number",
+          "label": {
+            "en": "Hardness",
+            "ru": "Резкость"
+          },
+          "default": 0.85,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "out",
+          "kind": "choice",
+          "label": {
+            "en": "Gives",
+            "ru": "Выдаёт"
+          },
+          "default": "colour",
+          "options": [
+            {
+              "value": "colour",
+              "label": {
+                "en": "Colour",
+                "ru": "Цвет"
+              }
+            },
+            {
+              "value": "height",
+              "label": {
+                "en": "Height",
+                "ru": "Высоту"
+              }
+            },
+            {
+              "value": "mask",
+              "label": {
+                "en": "Mask",
+                "ru": "Маску"
+              }
+            }
+          ]
+        }
+      ],
+      "glsl": "float ha = inG_heightTop(uv) + p_offset, hb = inG_heightBottom(uv); float w = (1. - p_contrast) * 0.5 + 0.005;\nfloat m = smoothstep(-w, w, ha - hb);\nvec3 r = p_out < 0.5 ? mix(inC_bottom(uv).rgb, inC_top(uv).rgb, m) : p_out < 1.5 ? vec3(clamp(mix(hb, ha, m), 0., 1.)) : vec3(m);\noutColor = vec4(r, 1.);",
+      "hash": "420941fb"
+    },
+    {
+      "type": "combineChannels",
+      "group": "combine",
+      "label": {
+        "en": "Combine channels",
+        "ru": "Собрать каналы"
+      },
+      "hint": {
+        "en": "Make a colour from three greys as its red, green and blue.",
+        "ru": "Собрать цвет из трёх серых как красный, зелёный и синий."
+      },
+      "inputs": [
+        {
+          "id": "r",
+          "kind": "grey",
+          "label": {
+            "en": "Red",
+            "ru": "Красный"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "g",
+          "kind": "grey",
+          "label": {
+            "en": "Green",
+            "ru": "Зелёный"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "b",
+          "kind": "grey",
+          "label": {
+            "en": "Blue",
+            "ru": "Синий"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [],
+      "glsl": "outColor = vec4(inG_r(uv), inG_g(uv), inG_b(uv), 1.);",
+      "hash": "50efb3e7"
+    },
+    {
+      "type": "splitChannel",
+      "group": "combine",
+      "label": {
+        "en": "Pick channel",
+        "ru": "Взять канал"
+      },
+      "hint": {
+        "en": "One channel of a colour as grey: red, green, blue, or brightness.",
+        "ru": "Один канал цвета как серое: красный, зелёный, синий или яркость."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "grey",
+      "params": [
+        {
+          "id": "channel",
+          "kind": "choice",
+          "label": {
+            "en": "Channel",
+            "ru": "Канал"
+          },
+          "default": "r",
+          "options": [
+            {
+              "value": "r",
+              "label": {
+                "en": "Red",
+                "ru": "Красный"
+              }
+            },
+            {
+              "value": "g",
+              "label": {
+                "en": "Green",
+                "ru": "Зелёный"
+              }
+            },
+            {
+              "value": "b",
+              "label": {
+                "en": "Blue",
+                "ru": "Синий"
+              }
+            },
+            {
+              "value": "l",
+              "label": {
+                "en": "Brightness",
+                "ru": "Яркость"
+              }
+            }
+          ]
+        }
+      ],
+      "glsl": "vec3 c = inC_in(uv).rgb; int k = int(p_channel + 0.5);\nfloat v = k == 0 ? c.r : k == 1 ? c.g : k == 2 ? c.b : dot(c, vec3(0.2126, 0.7152, 0.0722));\noutColor = vec4(vec3(v), 1.);",
+      "hash": "19c4e3b2"
+    },
+    {
+      "type": "colorSelect",
+      "group": "combine",
+      "label": {
+        "en": "Colour to mask",
+        "ru": "Цвет в маску"
+      },
+      "hint": {
+        "en": "White where the picture is close to a colour: pick out one part to treat differently.",
+        "ru": "Белое там, где картинка близка к цвету: выделить часть, чтобы обработать отдельно."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "grey",
+      "params": [
+        {
+          "id": "color",
+          "kind": "color",
+          "label": {
+            "en": "Colour",
+            "ru": "Цвет"
+          },
+          "default": "#808080"
+        },
+        {
+          "id": "tolerance",
+          "kind": "number",
+          "label": {
+            "en": "Tolerance",
+            "ru": "Допуск"
+          },
+          "default": 0.2,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "softness",
+          "kind": "number",
+          "label": {
+            "en": "Softness",
+            "ru": "Мягкость"
+          },
+          "default": 0.2,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "glsl": "float d = distance(inC_in(uv).rgb, p_color);\noutColor = vec4(vec3(1. - smoothstep(p_tolerance, p_tolerance + p_softness * 0.3 + 1e-3, d)), 1.);",
+      "hash": "8c112f0e"
+    },
+    {
+      "type": "replaceColor",
+      "group": "colour",
+      "label": {
+        "en": "Replace colour",
+        "ru": "Заменить цвет"
+      },
+      "hint": {
+        "en": "Swap one colour for another (and its near shades).",
+        "ru": "Заменить один цвет другим (и близкие оттенки)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "from",
+          "kind": "color",
+          "label": {
+            "en": "From",
+            "ru": "Какой"
+          },
+          "default": "#808080"
+        },
+        {
+          "id": "to",
+          "kind": "color",
+          "label": {
+            "en": "To",
+            "ru": "На какой"
+          },
+          "default": "#c05040"
+        },
+        {
+          "id": "tolerance",
+          "kind": "number",
+          "label": {
+            "en": "Tolerance",
+            "ru": "Допуск"
+          },
+          "default": 0.25,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "softness",
+          "kind": "number",
+          "label": {
+            "en": "Softness",
+            "ru": "Мягкость"
+          },
+          "default": 0.3,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "glsl": "vec3 c = inC_in(uv).rgb;\nfloat m = 1. - smoothstep(p_tolerance, p_tolerance + p_softness * 0.3 + 1e-3, distance(c, p_from));\noutColor = vec4(mix(c, clamp(c + (p_to - p_from), 0., 1.), m), 1.);",
+      "hash": "40dd0feb"
+    },
+    {
+      "type": "desaturate",
+      "group": "colour",
+      "label": {
+        "en": "Desaturate",
+        "ru": "Обесцветить"
+      },
+      "hint": {
+        "en": "Take the colour out, partly or fully.",
+        "ru": "Убрать цвет, частично или полностью."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "amount",
+          "kind": "number",
+          "label": {
+            "en": "Amount",
+            "ru": "Сила"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "glsl": "vec3 c = inC_in(uv).rgb; outColor = vec4(mix(c, vec3(dot(c, vec3(0.2126, 0.7152, 0.0722))), p_amount), 1.);",
+      "hash": "55f322e3"
+    },
+    {
+      "type": "colorVariation",
+      "group": "colour",
+      "label": {
+        "en": "Colour variation",
+        "ru": "Разнообразие цвета"
+      },
+      "hint": {
+        "en": "Break up a flat colour with large, soft shifts in brightness and hue.",
+        "ru": "Оживить ровный цвет крупными мягкими сдвигами яркости и тона."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0.6,
+            0.6,
+            0.6
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "amount",
+          "kind": "number",
+          "label": {
+            "en": "Brightness",
+            "ru": "Яркость"
+          },
+          "default": 0.3,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "hue",
+          "kind": "number",
+          "label": {
+            "en": "Hue",
+            "ru": "Тон"
+          },
+          "default": 0.05,
+          "min": 0,
+          "max": 0.5
+        },
+        {
+          "id": "scale",
+          "kind": "int",
+          "label": {
+            "en": "Size",
+            "ru": "Размер"
+          },
+          "default": 4,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "float n = fbm(uv, p_scale, 4., 0.5, 0., p_seed) - 0.5; float n2 = fbm(uv, p_scale, 4., 0.5, 0., p_seed + 9.) - 0.5;\nvec3 h = rgb2hsv(inC_in(uv).rgb); h.x = fract(h.x + n2 * p_hue * 2.); h.z = clamp(h.z * (1. + n * p_amount * 2.), 0., 1.);\noutColor = vec4(hsv2rgb(h), 1.);",
+      "hash": "f4583232"
+    },
+    {
+      "type": "temperature",
+      "group": "colour",
+      "label": {
+        "en": "Warm or cool",
+        "ru": "Теплее или холоднее"
+      },
+      "hint": {
+        "en": "Shift the colours warmer (orange) or cooler (blue), and greener or pinker.",
+        "ru": "Сдвинуть цвета теплее (оранжевее) или холоднее (синее), и зеленее или розовее."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "In",
+            "ru": "Вход"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "warmth",
+          "kind": "number",
+          "label": {
+            "en": "Warmth",
+            "ru": "Теплота"
+          },
+          "default": 0.2,
+          "min": -1,
+          "max": 1
+        },
+        {
+          "id": "tint",
+          "kind": "number",
+          "label": {
+            "en": "Green–pink",
+            "ru": "Зелёный–розовый"
+          },
+          "default": 0,
+          "min": -1,
+          "max": 1
+        }
+      ],
+      "glsl": "vec3 c = inC_in(uv).rgb; c.r += p_warmth * 0.12; c.b -= p_warmth * 0.12; c.g -= p_tint * 0.1; c.rb += p_tint * 0.04;\noutColor = vec4(clamp(c, 0., 1.), 1.);",
+      "hash": "e6f8a4ca"
+    },
+    {
+      "type": "normalBlend",
+      "group": "surface",
+      "label": {
+        "en": "Combine normals",
+        "ru": "Совместить нормали"
+      },
+      "hint": {
+        "en": "Lay fine detail bumps over a base normal map (both from Height to normal).",
+        "ru": "Наложить мелкий рельеф на основную карту нормалей (обе из «Высота в нормали»)."
+      },
+      "inputs": [
+        {
+          "id": "base",
+          "kind": "color",
+          "label": {
+            "en": "Base",
+            "ru": "Основа"
+          },
+          "fallback": [
+            0.5,
+            0.5,
+            1
+          ]
+        },
+        {
+          "id": "detail",
+          "kind": "color",
+          "label": {
+            "en": "Detail",
+            "ru": "Детали"
+          },
+          "fallback": [
+            0.5,
+            0.5,
+            1
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "strength",
+          "kind": "number",
+          "label": {
+            "en": "Detail strength",
+            "ru": "Сила деталей"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 2
+        }
+      ],
+      "glsl": "vec3 a = inC_base(uv).rgb * 2. - 1.; vec3 b = inC_detail(uv).rgb * 2. - 1.; b.xy *= p_strength;\noutColor = vec4(normalize(vec3(a.xy + b.xy, max(a.z * b.z, 1e-3))) * 0.5 + 0.5, 1.);",
+      "hash": "b203840a"
+    },
+    {
+      "type": "normalAdjust",
+      "group": "surface",
+      "label": {
+        "en": "Adjust normals",
+        "ru": "Настроить нормали"
+      },
+      "hint": {
+        "en": "Make bumps stronger or flatter, or flip them (for maps made the other way up).",
+        "ru": "Сделать рельеф сильнее или площе, или перевернуть (для карт, сделанных наоборот)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "Normal",
+            "ru": "Нормали"
+          },
+          "fallback": [
+            0.5,
+            0.5,
+            1
+          ]
+        }
+      ],
+      "output": "color",
+      "params": [
+        {
+          "id": "strength",
+          "kind": "number",
+          "label": {
+            "en": "Strength",
+            "ru": "Сила"
+          },
+          "default": 1,
+          "min": 0,
+          "max": 4
+        },
+        {
+          "id": "flip",
+          "kind": "bool",
+          "label": {
+            "en": "Flip green",
+            "ru": "Перевернуть зелёный"
+          },
+          "default": false
+        }
+      ],
+      "glsl": "vec3 n = inC_in(uv).rgb * 2. - 1.; n.xy *= p_strength; if (p_flip > 0.5) n.y = -n.y;\noutColor = vec4(normalize(vec3(n.xy, max(n.z, 1e-3))) * 0.5 + 0.5, 1.);",
+      "hash": "afcfadf8"
+    },
+    {
+      "type": "edgeWear",
+      "group": "surface",
+      "label": {
+        "en": "Edge wear",
+        "ru": "Износ краёв"
+      },
+      "hint": {
+        "en": "A mask of worn edges from a height picture, broken up with noise: paint chipped off corners.",
+        "ru": "Маска стёртых краёв по карте высот, разбитая шумом: краска, стёртая на углах."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Height",
+            "ru": "Высота"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "grey",
+      "params": [
+        {
+          "id": "amount",
+          "kind": "number",
+          "label": {
+            "en": "Amount",
+            "ru": "Сколько"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "breakup",
+          "kind": "number",
+          "label": {
+            "en": "Breakup",
+            "ru": "Разрывы"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "scale",
+          "kind": "int",
+          "label": {
+            "en": "Noise size",
+            "ru": "Размер шума"
+          },
+          "default": 12,
+          "min": 1,
+          "max": 64
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "float h = inG_in(uv); float r = 0.004;\nfloat lap = 4. * h - inG_in(uv + vec2(r, 0.)) - inG_in(uv - vec2(r, 0.)) - inG_in(uv + vec2(0., r)) - inG_in(uv - vec2(0., r));\nfloat edge = clamp(lap * 40., 0., 1.); float n = fbm(uv, p_scale, 5., 0.6, 0., p_seed);\nfloat v = edge * mix(1., n * 1.6, p_breakup);\noutColor = vec4(vec3(smoothstep(1. - p_amount, 1. - p_amount + 0.15, v)), 1.);",
+      "hash": "16124dcc"
+    },
+    {
+      "type": "dirt",
+      "group": "surface",
+      "label": {
+        "en": "Dirt",
+        "ru": "Грязь"
+      },
+      "hint": {
+        "en": "A mask of dirt gathering in the dips of a height picture, spread a little with noise.",
+        "ru": "Маска грязи, собирающейся во впадинах карты высот, немного разбросанной шумом."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Height",
+            "ru": "Высота"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": "grey",
+      "params": [
+        {
+          "id": "amount",
+          "kind": "number",
+          "label": {
+            "en": "Amount",
+            "ru": "Сколько"
+          },
+          "default": 0.4,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "scale",
+          "kind": "int",
+          "label": {
+            "en": "Noise size",
+            "ru": "Размер шума"
+          },
+          "default": 6,
+          "min": 1,
+          "max": 32
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "float h = inG_in(uv); float s = 0., w = 0.;\nfor (int y = -2; y <= 2; y++) for (int x = -2; x <= 2; x++) { vec2 o = vec2(x, y) / 2.; float k = exp(-dot(o, o)); s += inG_in(uv + o * 0.03) * k; w += k; }\nfloat cav = clamp((s / w - h) * 8., 0., 1.); float n = fbm(uv, p_scale, 5., 0.55, 0., p_seed);\noutColor = vec4(vec3(clamp(cav * 1.5 + (n - 1. + p_amount) * 1.5, 0., 1.)), 1.);",
+      "hash": "1778ff5d"
+    },
+    {
+      "type": "drips",
+      "group": "surface",
+      "label": {
+        "en": "Drips and streaks",
+        "ru": "Потёки"
+      },
+      "hint": {
+        "en": "Thin streaks running down, thinning as they go: rain stains, rust runs, leaks.",
+        "ru": "Тонкие потёки вниз, сужающиеся к концу: следы дождя, ржавчины, протечки."
+      },
+      "inputs": [],
+      "output": "grey",
+      "params": [
+        {
+          "id": "count",
+          "kind": "int",
+          "label": {
+            "en": "Lanes",
+            "ru": "Дорожек"
+          },
+          "default": 32,
+          "min": 4,
+          "max": 128
+        },
+        {
+          "id": "amount",
+          "kind": "number",
+          "label": {
+            "en": "Amount",
+            "ru": "Сколько"
+          },
+          "default": 0.5,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "id": "length",
+          "kind": "number",
+          "label": {
+            "en": "Length",
+            "ru": "Длина"
+          },
+          "default": 0.5,
+          "min": 0.05,
+          "max": 1
+        },
+        {
+          "id": "seed",
+          "kind": "seed",
+          "label": {
+            "en": "Seed",
+            "ru": "Зерно"
+          },
+          "default": 0
+        }
+      ],
+      "glsl": "float col = floor(uv.x * p_count); vec2 o = seedv(p_seed); float cm = mod(col, p_count);\nfloat has = step(1. - p_amount, hash12(vec2(cm, 1.) + o));\nfloat start = hash12(vec2(cm, 2.) + o); float len = p_length * (0.3 + 0.7 * hash12(vec2(cm, 3.) + o));\nfloat y = fract(uv.y - start); float t = clamp(y / max(len, 1e-3), 0., 1.);\nfloat fx = fract(uv.x * p_count) - 0.5; float wd = 0.35 * (1. - t) + 0.02;\nfloat v = has * step(y, len) * (1. - smoothstep(wd * 0.6, wd, abs(fx))) * (1. - t);\noutColor = vec4(vec3(v), 1.);",
+      "hash": "251095ef"
+    },
+    {
+      "type": "outColor",
+      "group": "output",
+      "label": {
+        "en": "Colour",
+        "ru": "Цвет"
+      },
+      "hint": {
+        "en": "The material’s colour.",
+        "ru": "Цвет материала."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "Colour",
+            "ru": "Цвет"
+          },
+          "fallback": [
+            0.7,
+            0.7,
+            0.7
+          ]
+        }
+      ],
+      "output": null,
+      "role": "color",
+      "params": [],
+      "glsl": "outColor = vec4(inC_in(uv).rgb, 1.);",
+      "hash": "8b3d7a05"
+    },
+    {
+      "type": "outHeight",
+      "group": "output",
+      "label": {
+        "en": "Height",
+        "ru": "Высота"
+      },
+      "hint": {
+        "en": "How high each spot is (white high): bumps when there is no normal map.",
+        "ru": "Высота каждой точки (белое — выше): рельеф, если нет карты нормалей."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Height",
+            "ru": "Высота"
+          },
+          "fallback": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "output": null,
+      "role": "height",
+      "params": [],
+      "glsl": "float v = inG_in(uv); outColor = vec4(vec3(v), 1.);",
+      "hash": "f07eeb40"
+    },
+    {
+      "type": "outNormal",
+      "group": "output",
+      "label": {
+        "en": "Normal",
+        "ru": "Нормали"
+      },
+      "hint": {
+        "en": "Bumps for lighting (from Height to normal).",
+        "ru": "Рельеф для освещения (из «Высота в нормали»)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "Normal",
+            "ru": "Нормали"
+          },
+          "fallback": [
+            0.5,
+            0.5,
+            1
+          ]
+        }
+      ],
+      "output": null,
+      "role": "normal",
+      "params": [],
+      "glsl": "outColor = vec4(inC_in(uv).rgb, 1.);",
+      "hash": "d1e74c57"
+    },
+    {
+      "type": "outRoughness",
+      "group": "output",
+      "label": {
+        "en": "Roughness",
+        "ru": "Шероховатость"
+      },
+      "hint": {
+        "en": "White is matte, black mirror-smooth.",
+        "ru": "Белое — матовое, чёрное — гладкое как зеркало."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Roughness",
+            "ru": "Шероховатость"
+          },
+          "fallback": [
+            0.8,
+            0.8,
+            0.8
+          ]
+        }
+      ],
+      "output": null,
+      "role": "roughness",
+      "params": [],
+      "glsl": "float v = inG_in(uv); outColor = vec4(vec3(v), 1.);",
+      "hash": "b65cc607"
+    },
+    {
+      "type": "outMetal",
+      "group": "output",
+      "label": {
+        "en": "Metal",
+        "ru": "Металл"
+      },
+      "hint": {
+        "en": "White where it is metal.",
+        "ru": "Белое — там, где металл."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Metal",
+            "ru": "Металл"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": null,
+      "role": "metalness",
+      "params": [],
+      "glsl": "float v = inG_in(uv); outColor = vec4(vec3(v), 1.);",
+      "hash": "b7eb8fdf"
+    },
+    {
+      "type": "outOcclusion",
+      "group": "output",
+      "label": {
+        "en": "Occlusion",
+        "ru": "Затенение"
+      },
+      "hint": {
+        "en": "Dark where little light gets in (cracks, dips).",
+        "ru": "Темнее там, куда мало света попадает (трещины, впадины)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Occlusion",
+            "ru": "Затенение"
+          },
+          "fallback": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "output": null,
+      "role": "occlusion",
+      "params": [],
+      "glsl": "float v = inG_in(uv); outColor = vec4(vec3(v), 1.);",
+      "hash": "b88aca60"
+    },
+    {
+      "type": "outGlow",
+      "group": "output",
+      "label": {
+        "en": "Glow",
+        "ru": "Свечение"
+      },
+      "hint": {
+        "en": "Where it glows, and in what colour (black: no glow).",
+        "ru": "Где светится и каким цветом (чёрное — не светится)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "Glow",
+            "ru": "Свечение"
+          },
+          "fallback": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "output": null,
+      "role": "glow",
+      "params": [],
+      "glsl": "outColor = vec4(inC_in(uv).rgb, 1.);",
+      "hash": "8698166a"
+    },
+    {
+      "type": "outOpacity",
+      "group": "output",
+      "label": {
+        "en": "Opacity",
+        "ru": "Непрозрачность"
+      },
+      "hint": {
+        "en": "Black is see-through (cut out), white solid.",
+        "ru": "Чёрное — насквозь (вырезано), белое — сплошное."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Opacity",
+            "ru": "Непрозрачность"
+          },
+          "fallback": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "output": null,
+      "role": "opacity",
+      "params": [],
+      "glsl": "float v = inG_in(uv); outColor = vec4(vec3(v), 1.);",
+      "hash": "b88aca60"
+    },
+    {
+      "type": "outWearColor",
+      "group": "output",
+      "label": {
+        "en": "Wear colour",
+        "ru": "Цвет износа"
+      },
+      "hint": {
+        "en": "The wear layer’s colour (bare metal under paint, dust): shown on edges, in creases or on top, as the material’s Wear settings say.",
+        "ru": "Цвет слоя износа (металл под краской, пыль): виден на краях, в углах или сверху, как задано в настройках износа материала."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "color",
+          "label": {
+            "en": "Wear colour",
+            "ru": "Цвет износа"
+          },
+          "fallback": [
+            0.6,
+            0.6,
+            0.6
+          ]
+        }
+      ],
+      "output": null,
+      "role": "wearColor",
+      "params": [],
+      "glsl": "outColor = vec4(inC_in(uv).rgb, 1.);",
+      "hash": "56efa4fc"
+    },
+    {
+      "type": "outWearRoughness",
+      "group": "output",
+      "label": {
+        "en": "Wear roughness",
+        "ru": "Шероховатость износа"
+      },
+      "hint": {
+        "en": "The wear layer’s roughness (white matte).",
+        "ru": "Шероховатость слоя износа (белое — матовое)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Wear roughness",
+            "ru": "Шероховатость износа"
+          },
+          "fallback": [
+            0.35,
+            0.35,
+            0.35
+          ]
+        }
+      ],
+      "output": null,
+      "role": "wearRoughness",
+      "params": [],
+      "glsl": "float v = inG_in(uv); outColor = vec4(vec3(v), 1.);",
+      "hash": "174b988b"
+    },
+    {
+      "type": "outWearMetal",
+      "group": "output",
+      "label": {
+        "en": "Wear metal",
+        "ru": "Металл износа"
+      },
+      "hint": {
+        "en": "Where the wear layer is metal (white).",
+        "ru": "Где слой износа металлический (белое)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Wear metal",
+            "ru": "Металл износа"
+          },
+          "fallback": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "output": null,
+      "role": "wearMetal",
+      "params": [],
+      "glsl": "float v = inG_in(uv); outColor = vec4(vec3(v), 1.);",
+      "hash": "b88aca60"
+    },
+    {
+      "type": "outWearNoise",
+      "group": "output",
+      "label": {
+        "en": "Wear noise",
+        "ru": "Шум износа"
+      },
+      "hint": {
+        "en": "Breaks the wear up: where it is white, wear shows sooner (a grunge works well).",
+        "ru": "Разбивает износ: где белое, износ проявляется раньше (хорошо подходит «Грязь»)."
+      },
+      "inputs": [
+        {
+          "id": "in",
+          "kind": "grey",
+          "label": {
+            "en": "Wear noise",
+            "ru": "Шум износа"
+          },
+          "fallback": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "output": null,
+      "role": "wearNoise",
+      "params": [],
+      "glsl": "float v = inG_in(uv); outColor = vec4(vec3(v), 1.);",
+      "hash": "f07eeb40"
+    }
+  ]
+}

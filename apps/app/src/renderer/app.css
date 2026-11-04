@@ -1,0 +1,61 @@
+.cs-app { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
+.cs-top .cs-mark { width: 20px; height: 20px; display: block; }
+.cs-top .cs-brushbar { display: flex; align-items: center; gap: 6px; }
+.cs-top .cs-brushbar .cs-nf { width: 74px; }
+.cs-top .cs-brushbar > span { color: var(--mute); font-size: 12px; }
+
+.cs-main { display: grid; grid-template-columns: 44px 248px minmax(0, 1fr) 300px; min-height: 0; }
+.cs-rail { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; }
+.cs-side { background: var(--panel); display: grid; min-height: 0; }
+.cs-side.l { border-right: 1px solid var(--line); grid-template-rows: auto minmax(0, 1fr); }
+.cs-side.r { border-left: 1px solid var(--line); grid-template-rows: minmax(160px, 1fr) minmax(0, 1.2fr); }
+.cs-pane { display: flex; flex-direction: column; min-height: 0; }
+.cs-pane + .cs-pane { border-top: 1px solid var(--line); }
+.cs-pane .cs-scroll { flex: 1; padding: 0 8px 10px; }
+.cs-props { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 14px; }
+.cs-ph .cs-acts { display: flex; gap: 2px; }
+.cs-ph .cs-acts .cs-ic { padding: 3px 5px; background: none; border-color: transparent; }
+.cs-ph .cs-acts .cs-ic:hover { background: var(--panel2); }
+
+.cs-view { position: relative; min-width: 0; min-height: 0; background: #1b1b1b; overflow: hidden; }
+.cs-gl { display: block; width: 100%; height: 100%; touch-action: none; }
+.cs-cursor { position: absolute; left: 0; top: 0; display: none; pointer-events: none; border: 1px solid rgba(255, 255, 255, 0.8); border-radius: 50%; margin: 0; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); translate: -50% -50%; }
+.cs-overlay { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; align-items: center; }
+.cs-overlay .cs-select { width: auto; background: var(--panel); }
+.cs-overlay .cs-btn { background: var(--panel); }
+.cs-busy { position: absolute; left: 50%; top: 12px; translate: -50% 0; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; }
+.cs-warn { position: absolute; left: 8px; bottom: 8px; max-width: 60%; display: flex; flex-direction: column; gap: 4px; }
+.cs-warn div { background: var(--panel); border: 1px solid var(--line); border-left: 2px solid var(--cs-warn); border-radius: 6px; padding: 6px 10px; display: flex; gap: 8px; align-items: center; }
+.cs-warn div span { flex: 1; }
+.cs-axes { position: absolute; left: 8px; top: 8px; display: flex; gap: 2px; }
+.cs-axes .cs-btn { background: var(--panel); }
+
+.cs-lr .cs-swatch { width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--line); flex: none; background-size: cover; }
+.cs-lr .cs-maskchip { width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--line); background: #fff; flex: none; cursor: pointer; padding: 0; }
+.cs-lr .cs-maskchip.on { outline: 2px solid var(--sel); outline-offset: 1px; }
+.cs-lr .cs-swatch.on { outline: 2px solid var(--sel); outline-offset: 1px; }
+.cs-lr .cs-meta { color: var(--mute); font-size: 11px; }
+.cs-drop { box-shadow: inset 0 2px 0 var(--sel); }
+.cs-dropin { box-shadow: inset 0 0 0 1px var(--sel); }
+
+.cs-lib { display: grid; grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); gap: 8px; padding: 4px 0; }
+.cs-mat { display: flex; flex-direction: column; gap: 4px; background: none; border: 1px solid transparent; border-radius: 6px; padding: 4px; cursor: pointer; text-align: center; font-size: 11px; color: var(--fg); }
+.cs-mat:hover { background: var(--panel2); }
+.cs-mat.on { border-color: var(--sel); }
+.cs-mat i { display: block; aspect-ratio: 1; border-radius: 50%; background: var(--panel2) center / cover; }
+.cs-mat span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.cs-range { display: grid; grid-template-columns: minmax(0, 1fr) 64px; gap: 8px; align-items: center; }
+.cs-range input[type='range'] { width: 100%; accent-color: var(--fg); height: 16px; margin: 0; }
+.cs-checks { display: flex; flex-wrap: wrap; gap: 4px; }
+.cs-chip { background: var(--panel2); border: 1px solid var(--line); color: var(--mute); border-radius: 5px; padding: 2px 8px; font-size: 12px; cursor: pointer; }
+.cs-chip.on { color: var(--fg); border-color: var(--mute); }
+.cs-note { color: var(--mute); font-size: 12px; line-height: 1.45; }
+.cs-note.warn { color: var(--cs-warn); }
+
+.cs-start { display: grid; place-items: center; height: 100%; }
+.cs-start > div { display: flex; flex-direction: column; gap: 14px; width: 340px; }
+.cs-start img { width: 181px; height: 56px; }
+.cs-start .cs-row { display: flex; gap: 8px; }
+.cs-start .cs-recent button { background: none; border: 0; text-align: left; padding: 5px 0; color: var(--fg); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; }
+.cs-start .cs-recent button:hover { color: #fff; text-decoration: underline; }
