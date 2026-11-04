@@ -71,3 +71,9 @@
 .cs-bake .cs-col > .cs-sec:first-child { margin-top: 0; border-top: 0; padding-top: 0; }
 .cs-toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
 .cs-toggles label { display: flex; align-items: center; gap: 8px; color: var(--mute); }
+.cs-assets { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cs-agrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 4px; max-height: 220px; overflow: auto; }
+.cs-acell { padding: 0; border: 1px solid transparent; background: none; border-radius: 4px; cursor: pointer; aspect-ratio: 1; }
+.cs-acell.on, .cs-acell:hover { border-color: var(--sel); }
+.cs-athumb { width: 100%; display: block; border-radius: 3px; }
+.cs-athumb.sm { width: 16px; height: 16px; display: inline-block; margin-right: 6px; vertical-align: middle; }

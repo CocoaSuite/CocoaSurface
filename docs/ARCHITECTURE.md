@@ -32,6 +32,7 @@
   - Curvature: from the world normal and position maps (float targets), `dN·dP / |dP|²` in both texture directions, mapped with `tanh`.
   - Work is drawn in 256 px tiles, waiting for each, so the screen stays responsive and the graphics card isn't reset by a long draw; it reports progress and can be stopped. Results are padded 16 texels past UV edges.
   - Baked maps feed the stack: the baked normal is the base of the normal channel (layers add detail on top), baked occlusion multiplies the occlusion channel (and shades the viewport even without it), and layers can take a generated mask from curvature, occlusion, thickness, height or up-facing.
+- `engine/procedural.ts` is the built-in picture library: one shader draws each asset (periodic noise and Voronoi so patterns and noises tile). Projects refer to them as `lib:<id>`; they're drawn at 1024 px when first used and never stored in the project.
 - `engine/library.ts` evaluates `.cocoamat` graphs in their own WebGL context with `GraphEvaluator`. Fill layers use up to 1024 px maps, re-evaluated a moment after their values change.
 - `engine/viewport.ts`: scene, cameras (perspective and orthographic), room lighting, input and brush cursor. Colour and glow maps are decoded from sRGB in the shader; other maps are data.
 - `store.ts`: Zustand store; the project is immutable data, and every change is an undo entry (`edit`, or `live` + `commit` for drags).

@@ -4,6 +4,7 @@ import { get, useApp } from '../store';
 import { BAKE_LAYER, Passes, SetGPU, type Key } from './gpu';
 import { evaluateMaps, toTextures, type RoleTextures } from './library';
 import type { LoadedModel } from './model';
+import { ASSETS, assetOf, drawAsset, type Asset } from './procedural';
 
 const decode = (m: THREE.Material, maps: string[]) => {
   m.onBeforeCompile = (s) => {
@@ -66,6 +67,51 @@ class Engine {
     const aspect = bmp.height / bmp.width;
     this.toolImages.set(name, { tex, aspect, url: URL.createObjectURL(new Blob([bytes as BlobPart])) });
     return aspect;
+  }
+
+  private lib = new Map<string, THREE.WebGLRenderTarget>();
+  private thumbs = new Map<string, string>();
+
+  /** A library asset (`lib:<id>`) as a texture, made the first time it's asked for. */
+  libTexture(ref: string): THREE.Texture | null {
+    const a = assetOf(ref);
+    if (!a || !this.r) return null;
+    let t = this.lib.get(a.id);
+    if (!t) this.lib.set(a.id, (t = drawAsset(this.r, a, 1024)));
+    return t.texture;
+  }
+
+  /** A picture of an asset for the library grid. */
+  thumb(a: Asset, size = 72): string {
+    const key = `${a.id}@${size}`;
+    let url = this.thumbs.get(key);
+    if (url || !this.r) return url ?? '';
+    const t = drawAsset(this.r, a, size);
+    const px = new Uint8Array(size * size * 4);
+    this.r.readRenderTargetPixels(t, 0, 0, size, size, px);
+    t.dispose();
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const img = c.getContext('2d')!.createImageData(size, size);
+    for (let y = 0; y < size; y++) img.data.set(px.subarray((size - 1 - y) * size * 4, (size - y) * size * 4), y * size * 4);
+    c.getContext('2d')!.putImageData(img, 0, 0);
+    url = c.toDataURL();
+    this.thumbs.set(key, url);
+    return url;
+  }
+
+  /** A picture by its path in the project, or a library asset. */
+  imageTexture(ref: string): THREE.Texture | null {
+    return this.images.get(ref)?.tex ?? this.libTexture(ref);
+  }
+
+  /** A brush tip or stencil picture: one the user chose this session, or a library asset. */
+  toolImage(name: string): { tex: THREE.Texture; aspect: number; url: string } | null {
+    const own = this.toolImages.get(name);
+    if (own) return own;
+    const a = assetOf(name);
+    const tex = a && this.libTexture(name);
+    return a && tex ? { tex, aspect: 1, url: this.thumb(a, 256) } : null;
   }
 
   clearImages(): void {
@@ -177,7 +223,7 @@ class Engine {
       const active = this.active?.set === id ? this.active : null;
       const only = what === 'all' ? null : [...what];
       if (only?.includes('height') && !only.includes('normal')) only.push('normal');
-      g.composite(t.layers, t.channels, t.bump ?? 1, only, active, (l) => this.fillFor(t, l), (f) => this.images.get(f)?.tex ?? null);
+      g.composite(t.layers, t.channels, t.bump ?? 1, only, active, (l) => this.fillFor(t, l), (f) => this.imageTexture(f));
       this.bind(t, g);
     }
     this.pending.clear();
@@ -249,7 +295,7 @@ class Engine {
 }
 
 export const engine = new Engine();
-if (new URLSearchParams(location.search).has('inspect')) (window as unknown as { surface: unknown }).surface = { engine, get };
+if (new URLSearchParams(location.search).has('inspect')) (window as unknown as { surface: unknown }).surface = { engine, get, assets: ASSETS };
 
 useApp.subscribe((s, prev) => {
   if (s.project !== prev.project) engine.syncSets(s.project);

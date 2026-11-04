@@ -233,11 +233,28 @@ test('effects on layers, group masks and blends, fill, smudge and blur tools', a
     for (let i = 0; i < half.length; i++) half[i] = i % 64 < 32 ? 0 : 255;
     const picture = path.join(tmp, 'half.png');
     writeFileSync(picture, await encodePng(64, 64, 1, half));
-    await open(() => pg.locator('.cs-props .cs-f', { hasText: 'Picture' }).last().getByRole('button').click(), picture);
+    await pg.locator('.cs-props .cs-f', { hasText: 'Picture' }).last().getByRole('button').first().click();
+    await open(() => pg.locator('.cs-props').getByRole('button', { name: 'Your own picture…' }).click(), picture);
     await pg.waitForTimeout(300);
     await field('Stencil size', 3);
     const stencilled = await fresh();
     assert.ok(stencilled > square * 0.3 && stencilled < square * 0.7, 'a half-black stencil stops half the stroke');
+    await pg.locator('.cs-props').getByRole('button', { name: 'Remove stencil' }).click();
+
+    // The built-in library: a star tip from the alphas, and a checker pattern in an Image effect.
+    await pg.locator('.cs-props').getByRole('radio', { name: 'Picture' }).click();
+    await pg.locator('.cs-props .cs-f').filter({ has: pg.locator('xpath=./span[text()="Picture"]') }).first().getByRole('button', { name: 'Choose…' }).click();
+    await pg.locator('.cs-props .cs-acell[aria-label="Star"]').click();
+    const star = await fresh();
+    assert.ok(star > 0 && star < square * 0.8, 'a library alpha shapes the brush');
+    await pg.locator('.cs-lr', { hasText: 'Base' }).click();
+    await pg.getByLabel('New fill layer').click();
+    await chip('Image');
+    await pg.locator('.cs-props .cs-f', { hasText: 'Image' }).getByRole('button', { name: 'Choose…' }).click();
+    await pg.locator('.cs-props').getByRole('radio', { name: 'Patterns' }).click();
+    await pg.locator('.cs-props .cs-acell[aria-label="Checker"]').click();
+    const checker = await rough();
+    assert.ok(checker.sd > 40, 'a library pattern in an Image effect');
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

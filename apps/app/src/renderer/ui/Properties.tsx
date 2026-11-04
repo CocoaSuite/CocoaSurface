@@ -8,6 +8,14 @@ import type { LoadedMaterial } from '../engine/library';
 import { exportFillMaterial } from '../io';
 import { commit, currentLayer, currentSet, editSet, set, useApp, type Brush } from '../store';
 import { Chips, Colour, Range } from './controls';
+import { AssetPicker } from './Assets';
+
+const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+  <div className="cs-f">
+    <span>{label}</span>
+    {children}
+  </div>
+);
 
 const change = (l: Layer, label: string, f: (x: Layer) => Layer, gesture = false) => editSet(label, (s) => ({ ...s, layers: updateLayer(s.layers, l.id, f) }), gesture);
 
@@ -275,11 +283,9 @@ function EffectProps({ l, t, w, it }: { l: Layer; t: TextureSet; w: Where; it: E
                 </select>
               </Field>
               {it.generator.noiseType === 'image' && (
-                <Field label="Noise picture">
-                  <Button size="sm" onClick={() => void pickNoise()}>
-                    {it.generator.noiseImage?.name ?? 'Choose…'}
-                  </Button>
-                </Field>
+                <Row label="Noise picture">
+                  <AssetPicker value={it.generator.noiseImage?.file} name={it.generator.noiseImage?.name} start="noise" onPick={(file, name) => putItem({ generator: { ...it.generator!, noiseImage: { file, name } } })} onFile={() => void pickNoise()} />
+                </Row>
               )}
               {range('Noise size', it.generator.noiseScale ?? 1, 0.1, 4, (v) => ({ generator: { ...it.generator!, noiseScale: v } }), 0.05)}
               <Field label="Seed">
@@ -299,11 +305,9 @@ function EffectProps({ l, t, w, it }: { l: Layer; t: TextureSet; w: Where; it: E
       )}
       {it.kind === 'image' && (
         <>
-          <Field label="Image">
-            <Button size="sm" onClick={() => void pickImage()}>
-              {it.image ? it.image.name : 'Choose…'}
-            </Button>
-          </Field>
+          <Row label="Image">
+            <AssetPicker value={it.image?.file} name={it.image?.name} start="pattern" onPick={(file, name) => putItem({ image: { file, name, scale: it.image?.scale ?? 1, invert: it.image?.invert ?? false }, name })} onFile={() => void pickImage()} />
+          </Row>
           {it.image && (
             <>
               {range('Repeat', it.image.scale, 0.25, 16, (v) => ({ image: { ...it.image!, scale: v } }), 0.25)}
@@ -388,11 +392,9 @@ function TipProps() {
         <Segmented label="Shape" options={[{ value: 'round', label: 'Round' }, { value: 'square', label: 'Square' }, { value: 'image', label: 'Picture' }]} value={b.shape} onChange={(v) => put({ shape: v as Brush['shape'] })} />
       </Field>
       {b.shape === 'image' && (
-        <Field label="Picture">
-          <Button size="sm" onClick={() => void pick((name) => put({ alpha: name }))}>
-            {b.alpha ?? 'Choose…'}
-          </Button>
-        </Field>
+        <Row label="Picture">
+          <AssetPicker value={b.alpha} name={b.alpha ?? undefined} start="alpha" onPick={(ref) => put({ alpha: ref })} onFile={() => void pick((name) => put({ alpha: name }))} />
+        </Row>
       )}
       <Field label="Angle">
         <Range value={b.angle} min={0} max={360} step={1} label="Angle" onChange={(v) => put({ angle: v })} onCommit={() => {}} />
@@ -409,11 +411,15 @@ function TipProps() {
         <Range value={b.stabilize} min={0} max={100} step={1} label="Stabiliser" onChange={(v) => put({ stabilize: v })} onCommit={() => {}} />
       </Field>
       <Section title="Stencil" />
-      <Field label="Picture">
-        <Button size="sm" onClick={() => void pick((name, aspect) => set((s) => ({ stencil: { x: 0.5, y: 0.5, scale: 0.5, angle: 0, ...s.stencil, name, aspect, on: true } })))}>
-          {stencil?.name ?? 'Choose…'}
-        </Button>
-      </Field>
+      <Row label="Picture">
+        <AssetPicker
+          value={stencil?.name}
+          name={stencil?.name}
+          start="pattern"
+          onPick={(name) => set((s) => ({ stencil: { x: 0.5, y: 0.5, scale: 0.5, angle: 0, ...s.stencil, name, aspect: 1, on: true } }))}
+          onFile={() => void pick((name, aspect) => set((s) => ({ stencil: { x: 0.5, y: 0.5, scale: 0.5, angle: 0, ...s.stencil, name, aspect, on: true } })))}
+        />
+      </Row>
       {stencil && (
         <>
           <Field label="Use">

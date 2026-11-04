@@ -10,7 +10,7 @@ A ZIP. The first entry is `mimetype`, stored, holding `application/vnd.cocoasuit
 | `baked/<set>/<map>.png` | Baked mesh maps, RGBA, row 0 at v = 0. |
 | `materials/<id>.cocoamat` | Library materials, unchanged. |
 | `pixels/<layer>/<channel>.png` | Painted pixels, RGBA, premultiplied, row 0 at v = 0. A mask's paint effect stores `pixels/<effect>/grey.png` (premultiplied grey); a layer's paint effect stores `pixels/<effect>/<channel>.png`. |
-| `masks/<id>.<ext>` | Pictures used by image effects. |
+| `masks/<id>.<ext>` | Pictures used by image effects and noise. A picture path of `lib:<id>` is a built-in library asset and has no entry. |
 
 Readers refuse a newer `version`, broken layers, duplicate layer ids, and missing model or material entries. Unknown `extensions` are kept.
 

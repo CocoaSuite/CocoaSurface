@@ -203,7 +203,8 @@ test('masks: black and white, painted, generated and image items', async () => {
     assert.ok(drawn.mean < hidden.mean && drawn.sd > 5, 'painting white in the mask shows the fill there');
 
     await pg.locator('.cs-props .cs-chip', { hasText: 'Image' }).click();
-    await open(() => pg.locator('.cs-props .cs-f', { hasText: 'Image' }).getByRole('button').click(), picture);
+    await pg.locator('.cs-props .cs-f', { hasText: 'Image' }).getByRole('button').first().click();
+    await open(() => pg.locator('.cs-props').getByRole('button', { name: 'Your own picture…' }).click(), picture);
     await pg.waitForTimeout(1500);
     const pictured = await rough();
     assert.ok(Math.abs(pictured.mean - 153 / 2) < 25, 'an image in the mask shows half the fill');

@@ -24,7 +24,7 @@ export function ViewportPane() {
   const warnings = useApp((s) => s.warnings);
   const job = useApp((s) => s.job);
   const stencil = useApp((s) => s.stencil);
-  const stencilUrl = stencil?.on ? engine.toolImages.get(stencil.name)?.url : undefined;
+  const stencilUrl = stencil?.on ? engine.toolImage(stencil.name)?.url : undefined;
   useApp((s) => s.project);
   const baked = currentSet()?.bake?.done ?? [];
 

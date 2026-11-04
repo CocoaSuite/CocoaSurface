@@ -279,13 +279,13 @@ export class Viewport {
     const s = get(), b = s.brush;
     const el = this.r.domElement;
     const st = s.stencil?.on ? s.stencil : null;
-    const sImg = st && engine.toolImages.get(st.name);
+    const sImg = st && engine.toolImage(st.name);
     return {
       hardness: b.hardness,
       flow: b.flow,
       shape: b.shape === 'square' ? 1 : b.shape === 'image' ? 2 : 0,
       angle: THREE.MathUtils.degToRad(b.angle),
-      alpha: (b.shape === 'image' && b.alpha && engine.toolImages.get(b.alpha)?.tex) || null,
+      alpha: (b.shape === 'image' && b.alpha && engine.toolImage(b.alpha)?.tex) || null,
       stencil: st && sImg ? { tex: sImg.tex, at: new THREE.Vector4(st.x * el.width, (1 - st.y) * el.height, st.scale * el.width, THREE.MathUtils.degToRad(st.angle)), aspect: sImg.aspect } : null,
     };
   }
