@@ -432,7 +432,8 @@ void main() {
 const QUAD = /* glsl */ `out vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }`;
 
 const PER_PASS = 8;
-const TILE = 256;
+/** Each draw aims to take about this long: long enough to keep the graphics card busy, short enough not to stall the screen or trip the driver's watchdog. */
+const BAND_MS = 60;
 /** Float targets are this large at most (memory), so anti-aliasing is lowered for big maps. */
 const MAX_WORK = 4096;
 
@@ -533,11 +534,14 @@ export async function bakeSet(
   if (want.has('normal')) passes.push({ out: 'normal', mode: 1, seed: 0 });
   if (want.has('position')) passes.push({ out: 'position', mode: 3, seed: 0 });
   if (want.has('id')) passes.push({ out: 'id', mode: 4, seed: 0 });
+  // Anti-aliasing averages ss² samples per texel, so occlusion and thickness split their rays between them.
+  const rayPasses = Math.max(1, Math.ceil(st.aoSamples / (ss * ss) / PER_PASS));
   for (const [m, mode] of [['occlusion', 5], ['thickness', 6]] as const)
-    if (want.has(m)) for (let i = 0; i < Math.ceil(st.aoSamples / PER_PASS); i++) passes.push({ out: m, mode, seed: i + 1 });
+    if (want.has(m)) for (let i = 0; i < rayPasses; i++) passes.push({ out: m, mode, seed: i + 1 });
   const total = passes.length + 1;
   const sync = new Float32Array(4);
   let last = performance.now();
+  let band = Math.max(8, Math.round(65536 / work));
   const auto = r.autoClear, prev = r.getRenderTarget();
   const clearTo = (t: THREE.WebGLRenderTarget) => {
     r.setRenderTarget(t);
@@ -577,25 +581,31 @@ export async function bakeSet(
       mat.uniforms.u_sp!.value = raw.get('sp')?.texture ?? null;
       mat.uniforms.u_sn!.value = raw.get('sn')?.texture ?? null;
       r.autoClear = false;
-      for (let y = 0; y < work; y += TILE)
-        for (let x = 0; x < work; x += TILE) {
-          if (cancelled()) return false;
-          t.scissor.set(x, y, Math.min(TILE, work - x), Math.min(TILE, work - y));
-          t.scissorTest = true;
-          for (const grp of groups) {
-            const own = grp.length === 1 ? src.own(grp[0]!) : src.all;
-            mat.uniforms.bvh!.value = own.bvh;
-            mat.uniforms.u_normals!.value = own.normals;
-            mat.uniforms.u_ids!.value = st.idFrom === 'mesh' ? own.idMesh : own.idSlot;
-            g.drawWith(stages[ps.mode === 8 && bevel ? 2 : ps.mode === 4 || ps.mode >= 7 ? 0 : ps.mode >= 5 ? 3 : 1], t, grp.length === 1 ? grp[0] : undefined);
-          }
-          r.readRenderTargetPixels(t, x, y, 1, 1, sync);
-          if (performance.now() - last > 30) {
-            progress({ done: i + (y * work + (x + TILE) * Math.min(TILE, work - y)) / (work * work), total });
-            await new Promise((res) => requestAnimationFrame(res));
-            last = performance.now();
-          }
+      // Full-width bands whose height follows how long the last one took.
+      for (let y = 0; y < work; ) {
+        if (cancelled()) return false;
+        const h = Math.min(band, work - y);
+        const t0 = performance.now();
+        t.scissor.set(0, y, work, h);
+        t.scissorTest = true;
+        for (const grp of groups) {
+          const own = grp.length === 1 ? src.own(grp[0]!) : src.all;
+          mat.uniforms.bvh!.value = own.bvh;
+          mat.uniforms.u_normals!.value = own.normals;
+          mat.uniforms.u_ids!.value = st.idFrom === 'mesh' ? own.idMesh : own.idSlot;
+          g.drawWith(stages[ps.mode === 8 && bevel ? 2 : ps.mode === 4 || ps.mode >= 7 ? 0 : ps.mode >= 5 ? 3 : 1], t, grp.length === 1 ? grp[0] : undefined);
         }
+        r.readRenderTargetPixels(t, 0, y, 1, 1, sync);
+        const ms = performance.now() - t0;
+        y += h;
+        if (ms < BAND_MS / 2) band = Math.min(work, band * 2);
+        else if (ms > BAND_MS * 2) band = Math.max(8, band >> 1);
+        if (performance.now() - last > 120) {
+          progress({ done: i + y / work, total });
+          await new Promise((res) => requestAnimationFrame(res));
+          last = performance.now();
+        }
+      }
       t.scissorTest = false;
       progress({ done: i + 1, total });
     }
@@ -611,7 +621,7 @@ export async function bakeSet(
       const s = raw.get(m);
       if (!s) continue;
       enc.uniforms.u_src!.value = s.texture;
-      enc.uniforms.u_div!.value = m === 'occlusion' || m === 'thickness' ? Math.ceil(st.aoSamples / PER_PASS) * PER_PASS : 1;
+      enc.uniforms.u_div!.value = m === 'occlusion' || m === 'thickness' ? rayPasses * PER_PASS : 1;
       enc.uniforms.u_kind!.value = m === 'worldNormal' ? 1 : 0;
       g.setBaked(m as MeshMap, (out) => g.p.run(enc, out), size);
     }

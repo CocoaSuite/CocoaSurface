@@ -30,7 +30,8 @@
   - World normal, position (bounding box 0–1), ID (color per material slot or mesh of the surface hit).
   - Occlusion and thickness: cosine rays over the hemisphere (inward for thickness), 8 rays per pass, added up in a half-float target.
   - Curvature: from the world normal and position maps (float targets), `dN·dP / |dP|²` in both texture directions, mapped with `tanh`.
-  - Work is drawn in 256 px tiles, waiting for each, so the screen stays responsive and the graphics card isn't reset by a long draw; it reports progress and can be stopped. Results are padded 16 texels past UV edges.
+  - Work is drawn in full-width bands, waiting for each; a band's height doubles while draws take under 30 ms and halves past 120 ms, so fast cards get big draws while the screen stays responsive and the driver's watchdog isn't tripped. It reports progress and can be stopped.
+  - With anti-aliasing, occlusion and thickness split their rays between the samples of a texel (they're averaged anyway), so 2× and 4× cost no more rays than 1×. Results are padded 16 texels past UV edges.
   - Baked maps feed the stack: the baked normal is the base of the normal channel (layers add detail on top), baked occlusion multiplies the occlusion channel (and shades the viewport even without it), and layers can take a generated mask from curvature, occlusion, thickness, height or up-facing.
 - `engine/procedural.ts` is the built-in picture library: one shader draws each asset (periodic noise and Voronoi so patterns and noises tile). Projects refer to them as `lib:<id>`; they're drawn at 1024 px when first used and never stored in the project.
 - `engine/library.ts` evaluates `.cocoamat` graphs in their own WebGL context with `GraphEvaluator`. Fill layers use up to 1024 px maps, re-evaluated a moment after their values change.
