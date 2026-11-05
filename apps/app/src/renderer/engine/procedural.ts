@@ -95,6 +95,8 @@ in vec2 vUv;
 out vec4 o;
 uniform int u_n;
 uniform float u_seed;
+uniform float u_contrast;
+uniform float u_balance;
 #define TAU 6.2831853
 
 float h1(vec2 p) { p = fract(p * vec2(123.34, 456.21) + u_seed * .1731); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -253,6 +255,7 @@ float alpha(int n, vec2 uv) {
 
 void main() {
   float v = u_n >= 40 && u_n < 60 || u_n >= 64 ? alpha(u_n, vUv) : u_n >= 20 && u_n < 40 ? pattern(u_n, vUv) : noise(u_n, vUv);
+  v = (v - .5) * u_contrast + .5 + u_balance;
   o = vec4(vec3(clamp(v, 0., 1.)), 1.);
 }`;
 
@@ -262,10 +265,12 @@ let mat: THREE.ShaderMaterial | null = null;
 const quad = new FullScreenQuad();
 
 /** Draws an asset into a new render target. */
-export function drawAsset(r: THREE.WebGLRenderer, a: Asset, size: number, seed = 0): THREE.WebGLRenderTarget {
-  mat ??= new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: VS, fragmentShader: FS, uniforms: { u_n: { value: 0 }, u_seed: { value: 0 } }, depthTest: false, depthWrite: false });
+export function drawAsset(r: THREE.WebGLRenderer, a: Asset, size: number, seed = 0, contrast = 1, balance = 0): THREE.WebGLRenderTarget {
+  mat ??= new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: VS, fragmentShader: FS, uniforms: { u_n: { value: 0 }, u_seed: { value: 0 }, u_contrast: { value: 1 }, u_balance: { value: 0 } }, depthTest: false, depthWrite: false });
   mat.uniforms.u_n!.value = a.n;
   mat.uniforms.u_seed!.value = seed;
+  mat.uniforms.u_contrast!.value = contrast;
+  mat.uniforms.u_balance!.value = balance;
   const t = new THREE.WebGLRenderTarget(size, size, { type: THREE.UnsignedByteType, magFilter: THREE.LinearFilter, minFilter: THREE.LinearMipmapLinearFilter, generateMipmaps: true, depthBuffer: false });
   t.texture.wrapS = t.texture.wrapT = THREE.RepeatWrapping;
   const prev = r.getRenderTarget();

@@ -1,14 +1,15 @@
-import { Button, Field, IconButton, NumberField, PanelHeader, Section, Segmented, Switch } from '@cocoasurface/ui';
+import { Button, Field, IconButton, NumberField, Section, Segmented, Switch } from '@cocoasurface/ui';
 import { engine } from '../engine/engine';
-import { host } from '../host';
 import { MASK_ROOT, addEffect, setMask } from './Layers';
-import { BLEND_MODES, CHANNELS, EFFECT_KINDS, GENERATOR_SOURCES, NOISE_LABELS, NOISE_TYPES, type NoiseType, MASK_BLENDS, newLayerEffect, newMaskItem, uid, updateLayer, type BlendMode, type Effect, type EffectKind, type FillLayer, type FlatValues, type Generator, type Layer, type TextureSet } from '@cocoasurface/project';
+import { BLEND_MODES, CHANNELS, EFFECT_KINDS, GENERATOR_SOURCES, NOISE_LABELS, NOISE_TYPES, type NoiseType, MASK_BLENDS, updateLayer, type BlendMode, type Effect, type FillLayer, type FlatValues, type Generator, type Layer, type TextureSet } from '@cocoasurface/project';
 import type { Parameter } from '@cocoasurface/materials';
 import type { LoadedMaterial } from '../engine/library';
 import { exportFillMaterial } from '../io';
 import { commit, currentLayer, currentSet, editSet, set, useApp, type Brush } from '../store';
 import { Chips, Color, Range } from './controls';
 import { AssetPicker } from './Assets';
+import { importPictures } from '../assets';
+import { ASSETS } from '../engine/procedural';
 
 const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <div className="cs-f">
@@ -192,18 +193,12 @@ function EffectProps({ l, t, w, it }: { l: Layer; t: TextureSet; w: Where; it: E
     });
   };
   const pickImage = async () => {
-    const [f] = await host.open([{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]);
-    if (!f) return;
-    const file = `masks/${uid()}.${f.name.split('.').pop()!.toLowerCase()}`;
-    await engine.addImage(file, f.bytes);
-    putItem({ image: { file, name: f.name, scale: it.image?.scale ?? 1, invert: it.image?.invert ?? false }, name: f.name.replace(/\.[^.]+$/, '') });
+    const [f] = await importPictures('texture');
+    if (f) putItem({ image: { file: f.file, name: f.name, scale: it.image?.scale ?? 1, invert: it.image?.invert ?? false }, name: f.name });
   };
   const pickNoise = async () => {
-    const [f] = await host.open([{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]);
-    if (!f) return;
-    const file = `masks/${uid()}.${f.name.split('.').pop()!.toLowerCase()}`;
-    await engine.addImage(file, f.bytes);
-    putItem({ generator: { ...it.generator!, noiseImage: { file, name: f.name } } });
+    const [f] = await importPictures('texture');
+    if (f) putItem({ generator: { ...it.generator!, noiseImage: { file: f.file, name: f.name } } });
   };
   const src = it.generator && GENERATOR_SOURCES.find((x) => x.value === it.generator!.source)!;
   const range = (label: string, value: number, min: number, max: number, f: (v: number) => Partial<Effect>, step?: number) => (
@@ -317,6 +312,52 @@ function EffectProps({ l, t, w, it }: { l: Layer; t: TextureSet; w: Where; it: E
           )}
         </>
       )}
+      {it.kind === 'procedural' && it.procedural && (
+        <>
+          <Field label="Pattern">
+            <select className="cs-select" value={it.procedural.asset} onChange={(e) => putItem({ procedural: { ...it.procedural!, asset: e.target.value }, name: ASSETS.find((a) => a.id === e.target.value)!.label })}>
+              <optgroup label="Noises">
+                {ASSETS.filter((a) => a.group === 'noise').map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.label}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Patterns">
+                {ASSETS.filter((a) => a.group === 'pattern').map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.label}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </Field>
+          {range('Scale', it.procedural.scale, 0.25, 32, (v) => ({ procedural: { ...it.procedural!, scale: v } }), 0.25)}
+          {range('Contrast', it.procedural.contrast, 0, 4, (v) => ({ procedural: { ...it.procedural!, contrast: v } }), 0.05)}
+          {range('Balance', it.procedural.balance, -1, 1, (v) => ({ procedural: { ...it.procedural!, balance: v } }), 0.01)}
+          <Field label="Seed">
+            <span className="cs-range">
+              <NumberField value={it.procedural.seed} label="" ariaLabel="Seed" onCommit={(v) => putItem({ procedural: { ...it.procedural!, seed: Math.round(v) } })} />
+              <Button size="sm" onClick={() => putItem({ procedural: { ...it.procedural!, seed: Math.floor(Math.random() * 1000) } })}>
+                New
+              </Button>
+            </span>
+          </Field>
+          <Field label="Invert">
+            <Switch checked={it.procedural.invert} label="Invert" onChange={(v) => putItem({ procedural: { ...it.procedural!, invert: v } })} />
+          </Field>
+          {w === 'layer' && l.channels.includes('color') && (
+            <>
+              <Field label="Dark">
+                <Color value={it.procedural.colors[0]} label="Dark color" onChange={(v) => putItem({ procedural: { ...it.procedural!, colors: [v, it.procedural!.colors[1]] } }, true)} onCommit={done} />
+              </Field>
+              <Field label="Light">
+                <Color value={it.procedural.colors[1]} label="Light color" onChange={(v) => putItem({ procedural: { ...it.procedural!, colors: [it.procedural!.colors[0], v] } }, true)} onCommit={done} />
+              </Field>
+            </>
+          )}
+        </>
+      )}
       {it.kind === 'fill' && w === 'mask' && range('Value', it.value ?? 1, 0, 1, (v) => ({ value: v }))}
       {it.kind === 'fill' &&
         w === 'layer' &&
@@ -373,10 +414,9 @@ function TipProps() {
   const tool = useApp((s) => s.tool);
   const stencil = useApp((s) => s.stencil);
   const put = (v: Partial<Brush>) => set((s) => ({ brush: { ...s.brush, ...v } }));
-  const pick = async (f: (name: string, aspect: number) => void) => {
-    const [x] = await host.open([{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]);
-    if (!x) return;
-    f(x.name, await engine.addToolImage(x.name, x.bytes));
+  const pick = async (kind: 'alpha' | 'texture', f: (file: string, aspect: number) => void) => {
+    const [x] = await importPictures(kind);
+    if (x) f(x.file, x.aspect);
   };
   const st = (v: Partial<NonNullable<typeof stencil>>) => set((s) => ({ stencil: s.stencil && { ...s.stencil, ...v } }));
   const r = (k: 'size' | 'flow' | 'opacity' | 'spacing' | 'hardness', label: string, max: number) => (
@@ -417,7 +457,7 @@ function TipProps() {
       </Field>
       {b.shape === 'image' && (
         <Row label="Picture">
-          <AssetPicker value={b.alpha} name={b.alpha ?? undefined} start="alpha" onPick={(ref) => put({ alpha: ref })} onFile={() => void pick((name) => put({ alpha: name }))} />
+          <AssetPicker value={b.alpha} name={b.alpha ?? undefined} start="alpha" onPick={(ref) => put({ alpha: ref })} onFile={() => void pick('alpha', (name) => put({ alpha: name }))} />
         </Row>
       )}
       <Section title="Stencil" />
@@ -426,8 +466,8 @@ function TipProps() {
           value={stencil?.name}
           name={stencil?.name}
           start="pattern"
-          onPick={(name) => set((s) => ({ stencil: { x: 0.5, y: 0.5, scale: 0.5, angle: 0, ...s.stencil, name, aspect: 1, on: true } }))}
-          onFile={() => void pick((name, aspect) => set((s) => ({ stencil: { x: 0.5, y: 0.5, scale: 0.5, angle: 0, ...s.stencil, name, aspect, on: true } })))}
+          onPick={(name) => set((s) => ({ stencil: { x: 0.5, y: 0.5, scale: 0.5, angle: 0, ...s.stencil, name, aspect: engine.images.get(name)?.aspect ?? 1, on: true } }))}
+          onFile={() => void pick('texture', (name, aspect) => set((s) => ({ stencil: { x: 0.5, y: 0.5, scale: 0.5, angle: 0, ...s.stencil, name, aspect, on: true } })))}
         />
       </Row>
       {stencil && (
@@ -540,7 +580,7 @@ export function Properties() {
           {own && l.kind === 'paint' && painting && <TipProps />}
           {own && l.kind === 'paint' && <BrushProps l={l} />}
           {own && l.kind === 'fill' && <FillProps l={l} />}
-          {own && l.kind !== 'group' && (
+          {own && (
             <>
               <Section title="Effects" />
               <AddEffect l={l} w="layer" />

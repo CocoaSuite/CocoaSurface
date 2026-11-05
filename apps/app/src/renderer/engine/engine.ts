@@ -37,8 +37,8 @@ class Engine {
   private pending = new Map<string, Set<Channel> | 'all'>();
   /** Something on screen changed: draw again. */
   onChange: () => void = () => {};
-  /** Pictures used by masks, by their path in the project. */
-  readonly images = new Map<string, { bytes: Uint8Array; tex: THREE.Texture }>();
+  /** Pictures used by masks, brushes and stencils, by their path in the project. */
+  readonly images = new Map<string, { bytes: Uint8Array; tex: THREE.Texture; aspect: number; url?: string }>();
 
   async addImage(file: string, bytes: Uint8Array): Promise<void> {
     const bmp = await createImageBitmap(new Blob([bytes as BlobPart]), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
@@ -47,7 +47,8 @@ class Engine {
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.colorSpace = THREE.NoColorSpace;
     tex.needsUpdate = true;
-    this.images.set(file, { bytes, tex });
+    this.images.get(file)?.tex.dispose();
+    this.images.set(file, { bytes, tex, aspect: bmp.height / bmp.width });
     for (const id of this.sets.keys()) this.request(id);
   }
 
@@ -100,22 +101,50 @@ class Engine {
     return url;
   }
 
-  /** A picture by its path in the project, or a library asset. */
+  private procs = new Map<string, THREE.WebGLRenderTarget>();
+
+  /** A procedural (`proc:<asset>:<seed>:<contrast>:<balance>`), drawn when first asked for. */
+  procTexture(ref: string): THREE.Texture | null {
+    let t = this.procs.get(ref);
+    if (!t) {
+      const [, id, seed, contrast, balance] = ref.split(':');
+      const a = assetOf(`lib:${id}`);
+      if (!a || !this.r) return null;
+      if (this.procs.size > 24) {
+        const [k, old] = this.procs.entries().next().value!;
+        old.dispose();
+        this.procs.delete(k);
+      }
+      this.procs.set(ref, (t = drawAsset(this.r, a, 1024, Number(seed), Number(contrast), Number(balance))));
+    }
+    return t.texture;
+  }
+
+  /** A picture by its path in the project, a library asset or a procedural. */
   imageTexture(ref: string): THREE.Texture | null {
-    return this.images.get(ref)?.tex ?? this.libTexture(ref);
+    return ref.startsWith('proc:') ? this.procTexture(ref) : (this.images.get(ref)?.tex ?? this.libTexture(ref));
+  }
+
+  /** A link to a project picture, for thumbnails. */
+  imageUrl(file: string): string | undefined {
+    const i = this.images.get(file);
+    if (i && !i.url) i.url = URL.createObjectURL(new Blob([i.bytes as BlobPart]));
+    return i?.url;
   }
 
   /** A brush tip or stencil picture: one the user chose this session, or a library asset. */
   toolImage(name: string): { tex: THREE.Texture; aspect: number; url: string } | null {
     const own = this.toolImages.get(name);
     if (own) return own;
+    const img = this.images.get(name);
+    if (img) return { tex: img.tex, aspect: img.aspect, url: this.imageUrl(name)! };
     const a = assetOf(name);
     const tex = a && this.libTexture(name);
     return a && tex ? { tex, aspect: 1, url: this.thumb(a, 256) } : null;
   }
 
   clearImages(): void {
-    for (const i of this.images.values()) i.tex.dispose();
+    for (const i of this.images.values()) (i.tex.dispose(), i.url && URL.revokeObjectURL(i.url));
     this.images.clear();
   }
 

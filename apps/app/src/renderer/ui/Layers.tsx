@@ -72,11 +72,10 @@ export function addEffect(l: Layer, w: 'mask' | 'layer', kind: EffectKind): void
 
 function effectMenu(l: Layer | null, mask: boolean): MenuEntry[] {
   if (!l) return [];
-  if (!mask && l.kind === 'group') return [{ label: 'Groups take masks, not effects', disabled: true, onSelect: () => {} }];
   return EFFECT_KINDS.filter((x) => !mask || x.mask).map((x) => ({ label: `Add ${x.label.toLowerCase()}`, onSelect: () => addEffect(l, mask ? 'mask' : 'layer', x.kind) }));
 }
 
-const ICON = { paint: 'brush', image: 'image', fill: 'fill', generator: 'layers', levels: 'effect', blur: 'blur', invert: 'effect', hsl: 'effect' } as const;
+const ICON = { paint: 'brush', image: 'image', procedural: 'grid', fill: 'fill', generator: 'layers', levels: 'effect', blur: 'blur', invert: 'effect', hsl: 'effect' } as const;
 
 function EffectRows({ l, depth }: { l: Layer; depth: number }) {
   const effect = useApp((s) => s.effect);

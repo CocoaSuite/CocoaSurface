@@ -160,13 +160,14 @@ export const MASK_BLENDS: { value: MaskBlend; label: string }[] = [
   { value: 'darken', label: 'Darken' },
 ];
 
-export type EffectKind = 'paint' | 'generator' | 'image' | 'fill' | 'levels' | 'blur' | 'invert' | 'hsl';
+export type EffectKind = 'paint' | 'generator' | 'image' | 'procedural' | 'fill' | 'levels' | 'blur' | 'invert' | 'hsl';
 
 export const EFFECT_KINDS: { kind: EffectKind; label: string; mask: boolean }[] = [
   { kind: 'paint', label: 'Paint', mask: true },
   { kind: 'fill', label: 'Fill', mask: true },
   { kind: 'generator', label: 'Generator', mask: true },
   { kind: 'image', label: 'Image', mask: true },
+  { kind: 'procedural', label: 'Procedural', mask: true },
   { kind: 'levels', label: 'Levels', mask: true },
   { kind: 'blur', label: 'Blur', mask: true },
   { kind: 'invert', label: 'Invert', mask: true },
@@ -184,6 +185,7 @@ export interface Effect {
   blend: BlendMode;
   generator?: Generator;
   image?: { file: string; name: string; scale: number; invert: boolean };
+  procedural?: Procedural;
   /** Fill in a mask. */
   value?: number;
   /** Fill on a layer. */
@@ -193,6 +195,23 @@ export interface Effect {
   radius?: number;
   hsl?: { hue: number; saturation: number; lightness: number };
 }
+
+/** A noise or pattern from the built-in library, made with its own seed and tone. On layers, dark to light goes from the first color to the second. */
+export interface Procedural {
+  /** Library asset id (a noise or pattern). */
+  asset: string;
+  scale: number;
+  seed: number;
+  contrast: number;
+  balance: number;
+  invert: boolean;
+  colors: [string, string];
+}
+
+export const PROCEDURAL_DEFAULTS: Procedural = { asset: 'clouds', scale: 1, seed: 0, contrast: 1, balance: 0, invert: false, colors: ['#000000', '#ffffff'] };
+
+/** How a procedural is looked up as a picture. */
+export const proceduralRef = (p: Procedural) => `proc:${p.asset}:${p.seed}:${p.contrast}:${p.balance}`;
 
 export type MaskItem = Effect;
 
@@ -205,6 +224,7 @@ export interface Mask {
 export function newEffect(kind: EffectKind, extra: Partial<Effect> = {}): Effect {
   const e: Effect = { id: uid(), name: EFFECT_KINDS.find((x) => x.kind === kind)!.label, kind, visible: true, opacity: 1, blend: 'normal', ...extra };
   if (kind === 'generator' && !e.generator) e.generator = { source: 'curvature', level: 0.6, spread: 0.1, invert: false };
+  if (kind === 'procedural' && !e.procedural) e.procedural = { ...PROCEDURAL_DEFAULTS, colors: [...PROCEDURAL_DEFAULTS.colors] };
   if (kind === 'levels' && !e.levels) e.levels = { low: 0, high: 1, gamma: 1 };
   if (kind === 'blur' && e.radius === undefined) e.radius = 0.005;
   if (kind === 'hsl' && !e.hsl) e.hsl = { hue: 0, saturation: 0, lightness: 0 };
@@ -273,7 +293,31 @@ export interface ExportSettings {
   size: TextureSize | 0;
   format: 'png';
   normalGreen: 'up' | 'down';
+  /** Old projects: true means `pack: 'orm'`. */
   packOrm: boolean;
+  /** orm: occlusion, roughness, metal in RGB; unity: metal in RGB with smoothness in alpha. */
+  pack?: 'none' | 'orm' | 'unity';
+  /** Outputs left out: channel ids, `pack`, or `mesh:<map>`. */
+  skip?: string[];
+  preset?: string;
+}
+
+export const packOf = (ex: ExportSettings) => ex.pack ?? (ex.packOrm ? 'orm' : 'none');
+
+export const EXPORT_PRESETS: { id: string; label: string; set: Partial<ExportSettings> }[] = [
+  { id: 'cocoaworlds', label: 'CocoaWorlds', set: { naming: '{set}_{map}', normalGreen: 'up', pack: 'none' } },
+  { id: 'gltf', label: 'glTF / Blender', set: { naming: '{set}_{map}', normalGreen: 'up', pack: 'orm' } },
+  { id: 'unreal', label: 'Unreal Engine', set: { naming: 'T_{set}_{map}', normalGreen: 'down', pack: 'orm' } },
+  { id: 'unity', label: 'Unity (URP)', set: { naming: '{set}_{map}', normalGreen: 'up', pack: 'unity' } },
+  { id: 'godot', label: 'Godot', set: { naming: '{set}_{map}', normalGreen: 'up', pack: 'orm' } },
+];
+
+/** A picture the user brought in: a brush alpha or a texture for masks and stencils. Kept in the project. */
+export interface ProjectAsset {
+  id: string;
+  file: string;
+  name: string;
+  kind: 'alpha' | 'texture';
 }
 
 export interface Project {
@@ -289,6 +333,7 @@ export interface Project {
   bevel?: Bevel | null;
   textureSets: TextureSet[];
   library: LibraryMaterial[];
+  assets?: ProjectAsset[];
   export: ExportSettings;
   extensions?: Record<string, unknown>;
 }

@@ -1,14 +1,15 @@
 import { useState, type DragEvent } from 'react';
-import { Icon, IconButton } from '@cocoasurface/ui';
+import { ContextMenu, Icon, IconButton } from '@cocoasurface/ui';
 import { outputNodes } from '@cocoasurface/materials';
-import { allLayers, findLayer, GENERATOR_SOURCES, insertLayer, newFillLayer, newLayerEffect, newMaskItem, placeOf, updateLayer, type Effect, type EffectKind, type FillLayer, type Generator, type Layer } from '@cocoasurface/project';
+import { allLayers, findLayer, GENERATOR_SOURCES, PROCEDURAL_DEFAULTS, insertLayer, newFillLayer, newLayerEffect, newMaskItem, placeOf, updateLayer, type Effect, type EffectKind, type FillLayer, type Generator, type Layer } from '@cocoasurface/project';
 import { engine } from '../engine/engine';
 import { forgetMaterial } from '../engine/library';
 import { ASSETS } from '../engine/procedural';
 import { importMaterials } from '../io';
+import { dropFromLibrary, imported, importPictures, inProject, saveToLibrary, useLibrary } from '../assets';
 import { currentSet, edit, editSet, ENVIRONMENTS, get, set, toast, useApp, type Environment } from '../store';
 
-export type ShelfItem = { kind: 'material' | 'smartmask' | 'alpha' | 'grunge' | 'procedural' | 'filter' | 'environment'; id: string; name: string };
+export type ShelfItem = { kind: 'material' | 'smartmask' | 'alpha' | 'grunge' | 'procedural' | 'filter' | 'environment'; id: string; name: string; imp?: boolean };
 
 const TYPE = 'application/x-cocoasurface-asset';
 const FILTERS: { id: EffectKind; name: string }[] = [
@@ -17,6 +18,16 @@ const FILTERS: { id: EffectKind; name: string }[] = [
   { id: 'invert', name: 'Invert' },
   { id: 'hsl', name: 'Hue and saturation' },
 ];
+const SMART: { id: string; name: string; g: Generator }[] = [
+  ...GENERATOR_SOURCES.map((x) => ({ id: x.value, name: x.label, g: { source: x.value, level: 0.6, spread: 0.1, invert: false } as Generator })),
+  { id: 'edge-wear', name: 'Edge wear', g: { source: 'curvature', level: 0.68, spread: 0.06, invert: false, noise: 0.55, noiseType: 'scratches', noiseScale: 1.4 } },
+  { id: 'chipped', name: 'Chipped edges', g: { source: 'curvature', level: 0.64, spread: 0.04, invert: false, noise: 0.7, noiseType: 'cells', noiseScale: 2 } },
+  { id: 'dirt', name: 'Dirt in cavities', g: { source: 'occlusion', level: 0.45, spread: 0.2, invert: false, noise: 0.45, noiseType: 'clouds', noiseScale: 1 } },
+  { id: 'dust', name: 'Dust on top', g: { source: 'up', level: 0.55, spread: 0.25, invert: false, noise: 0.35, noiseType: 'grain', noiseScale: 1 } },
+  { id: 'grime', name: 'Ground grime', g: { source: 'height', level: 0.25, spread: 0.2, invert: true, noise: 0.5, noiseType: 'clouds', noiseScale: 0.8 } },
+  { id: 'thin-glow', name: 'Thin parts', g: { source: 'thickness', level: 0.4, spread: 0.15, invert: true } },
+];
+
 const CATS: { id: ShelfItem['kind']; label: string }[] = [
   { id: 'material', label: 'Materials' },
   { id: 'smartmask', label: 'Smart masks' },
@@ -60,26 +71,28 @@ function toMask(l: Layer, item: Effect, label: string): void {
 }
 
 /** What clicking an asset, or dropping it on a layer, does. */
-export function applyItem(a: ShelfItem, layerId: string | null = get().layerId): void {
+export async function applyItem(a: ShelfItem, layerId: string | null = get().layerId): Promise<void> {
+  const ref = a.imp || a.kind === 'material' ? await inProject(a.id) : `lib:${a.id}`;
+  if (!ref) return;
   const t = currentSet();
   const l = t && layerId ? findLayer(t.layers, layerId) : null;
   switch (a.kind) {
     case 'material':
-      return useMaterial(a.id, layerId);
+      return useMaterial(ref, layerId);
     case 'alpha':
-      return set((s) => ({ brush: { ...s.brush, shape: 'image', alpha: `lib:${a.id}` } }));
+      return set((s) => ({ brush: { ...s.brush, shape: 'image', alpha: ref } }));
     case 'environment':
       return set((s) => ({ view: { ...s.view, env: a.id as Environment } }));
   }
   if (!l) return toast('Pick a layer first.');
   if (a.kind === 'smartmask') {
-    const g: Generator = { source: a.id as Generator['source'], level: 0.6, spread: 0.1, invert: false };
-    if (!t!.bake?.done.includes(GENERATOR_SOURCES.find((x) => x.value === a.id)!.map)) toast('Bake the mesh maps for this mask to show.');
+    const g = { ...SMART.find((x) => x.id === a.id)!.g };
+    if (!t!.bake?.done.includes(GENERATOR_SOURCES.find((x) => x.value === g.source)!.map)) toast('Bake the mesh maps for this mask to show.');
     return toMask(l, newMaskItem('generator', { generator: g, name: a.name }), `Add ${a.name} to ${l.name}`);
   }
-  if (a.kind === 'grunge' || a.kind === 'procedural') return toMask(l, newMaskItem('image', { image: { file: `lib:${a.id}`, name: a.name, scale: 1, invert: false }, name: a.name }), `Add ${a.name} to ${l.name}`);
+  if (a.kind === 'procedural') return toMask(l, newMaskItem('procedural', { procedural: { ...PROCEDURAL_DEFAULTS, colors: [...PROCEDURAL_DEFAULTS.colors], asset: a.id }, name: a.name }), `Add ${a.name} to ${l.name}`);
+  if (a.kind === 'grunge') return toMask(l, newMaskItem('image', { image: { file: ref, name: a.name, scale: 1, invert: false }, name: a.name }), `Add ${a.name} to ${l.name}`);
   if (a.kind === 'filter') {
-    if (l.kind === 'group') return toast('Groups take masks, not effects.');
     const e = newLayerEffect(a.id as EffectKind);
     editSet(`Add ${e.name}`, (s) => ({ ...s, layers: updateLayer(s.layers, l.id, (x) => ({ ...x, effects: [...(x.effects ?? []), e] })) }));
     set({ layerId: l.id, effect: e.id, maskItem: null });
@@ -89,15 +102,18 @@ export function applyItem(a: ShelfItem, layerId: string | null = get().layerId):
 function items(kind: ShelfItem['kind']): (ShelfItem & { thumb?: string; icon?: 'mask' | 'effect' | 'sun' })[] {
   const s = get();
   switch (kind) {
-    case 'material':
-      return (s.project?.library ?? []).map((m) => ({ kind, id: m.id, name: m.name, thumb: s.materials[m.id]?.thumb ?? undefined }));
+    case 'material': {
+      const own = (s.project?.library ?? []).map((m) => ({ kind, id: m.id, name: m.name, thumb: s.materials[m.id]?.thumb ?? undefined }));
+      const lib = useLibrary.getState().items.filter((x) => x.kind === 'material' && !own.some((o) => o.id === x.id));
+      return [...own, ...lib.map((x) => ({ kind, id: x.id, name: x.name, icon: 'sun' as const }))];
+    }
     case 'smartmask':
-      return GENERATOR_SOURCES.map((g) => ({ kind, id: g.value, name: g.label, icon: 'mask' }));
+      return SMART.map((g) => ({ kind, id: g.id, name: g.name, icon: 'mask' }));
     case 'alpha':
     case 'grunge':
     case 'procedural': {
-      const g = kind === 'alpha' ? 'alpha' : kind === 'grunge' ? 'pattern' : 'noise';
-      return ASSETS.filter((a) => a.group === g).map((a) => ({ kind, id: a.id, name: a.label, thumb: engine.thumb(a) }));
+      const mine = kind === 'procedural' ? [] : imported(kind === 'alpha' ? 'alpha' : 'texture').map((x) => ({ kind, id: x.id, name: x.name, thumb: x.thumb, imp: true }));
+      return [...mine, ...ASSETS.filter((a) => (kind === 'alpha' ? a.group === 'alpha' : kind === 'grunge' ? a.group === 'noise' : a.group !== 'alpha')).map((a) => ({ kind, id: a.id, name: a.label, thumb: engine.thumb(a) }))];
     }
     case 'filter':
       return FILTERS.map((f) => ({ kind, id: f.id, name: f.name, icon: 'effect' }));
@@ -114,8 +130,10 @@ export function Shelf() {
   const [cat, setCat] = useState<ShelfItem['kind']>('material');
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const lib = useLibrary((s) => s.items);
   const list = items(cat).filter((x) => x.name.toLowerCase().includes(q.trim().toLowerCase()));
-  const on = (x: ShelfItem) => (x.kind === 'environment' ? env === x.id : x.kind === 'alpha' ? alpha === `lib:${x.id}` : picked === x.id);
+  const on = (x: ShelfItem) => (x.kind === 'environment' ? env === x.id : x.kind === 'alpha' ? alpha === `lib:${x.id}` || (!!x.imp && !!alpha?.includes(x.id)) : picked === x.id);
   const used = (id: string) => get().project!.textureSets.some((t) => allLayers(t.layers).some((l) => l.kind === 'fill' && l.use?.material === id));
   return (
     <div className="cs-shelf">
@@ -146,6 +164,7 @@ export function Shelf() {
             />
           )}
           {cat === 'material' && <IconButton icon="plus" label="Import materials" onClick={() => void importMaterials()} />}
+          {(cat === 'alpha' || cat === 'grunge') && <IconButton icon="plus" label={cat === 'alpha' ? 'Import alphas' : 'Import textures'} onClick={() => void importPictures(cat === 'alpha' ? 'alpha' : 'texture')} />}
         </div>
         <div className="cs-shgrid">
           {list.map((x) => (
@@ -156,11 +175,16 @@ export function Shelf() {
               title={x.name}
               draggable
               onDragStart={(e) => {
-                e.dataTransfer.setData(TYPE, JSON.stringify({ kind: x.kind, id: x.id, name: x.name }));
+                e.dataTransfer.setData(TYPE, JSON.stringify({ kind: x.kind, id: x.id, name: x.name, imp: x.imp }));
                 e.dataTransfer.effectAllowed = 'copy';
               }}
-              onClick={() => (x.kind === 'alpha' || x.kind === 'environment' ? applyItem(x) : setPicked(x.id))}
-              onDoubleClick={() => applyItem(x)}
+              onClick={() => (x.kind === 'alpha' || x.kind === 'environment' ? void applyItem(x) : setPicked(x.id))}
+              onDoubleClick={() => void applyItem(x)}
+              onContextMenu={(e) => {
+                if (!x.imp && x.kind !== 'material') return;
+                e.preventDefault();
+                setMenu({ x: e.clientX, y: e.clientY, id: x.id });
+              }}
             >
               <i className={x.kind === 'material' ? 'ball' : ''} style={x.thumb ? { backgroundImage: `url(${x.thumb})` } : undefined}>
                 {!x.thumb && x.icon && <Icon name={x.icon} size={22} />}
@@ -168,6 +192,18 @@ export function Shelf() {
               <span>{x.name}</span>
             </button>
           ))}
+          {menu && (
+            <ContextMenu
+              x={menu.x}
+              y={menu.y}
+              onClose={() => setMenu(null)}
+              items={
+                lib.some((y) => y.id === menu.id)
+                  ? [{ label: 'Remove from my library', onSelect: () => void dropFromLibrary(menu.id) }]
+                  : [{ label: 'Add to my library', onSelect: () => void saveToLibrary(menu.id) }]
+              }
+            />
+          )}
           {!list.length && <div className="cs-empty">{cat === 'material' && !q ? 'Import .cocoamat materials to drag them onto the layers.' : 'Nothing here.'}</div>}
         </div>
       </div>

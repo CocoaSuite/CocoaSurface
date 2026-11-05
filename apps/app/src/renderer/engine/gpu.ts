@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
-import { BLEND_MODES, blendIn, GENERATOR_SOURCES, MASK_BLENDS, NOISE_TYPES, type Effect, type FlatValues, type Mask, channelInfo, type Channel, type FillLayer, type Layer, type TextureSet } from '@cocoasurface/project';
+import { BLEND_MODES, blendIn, GENERATOR_SOURCES, proceduralRef, MASK_BLENDS, NOISE_TYPES, type Effect, type FlatValues, type Mask, channelInfo, type Channel, type FillLayer, type Layer, type TextureSet } from '@cocoasurface/project';
 import type { Part } from './model';
 import type { RoleTextures } from './library';
 import { COMMIT_FS, COPY_FS, DAB_FS, DIST_FS, DIST_VS, EFFECT_FS, FILL_FS, FINAL_FS, ISLAND_FS, ISLAND_VS, LAYER_FS, MASK_FS, MAX_DABS, PICK_FS, QUAD_VS, SMEAR_FS, UV_VS } from './shaders';
@@ -54,7 +54,7 @@ export class Passes {
   });
   readonly effect = shader(EFFECT_FS, {
     u_below: { value: null }, u_tex: { value: null }, u_src: { value: 0 }, u_kind: { value: 0 }, u_blend: { value: 0 }, u_vUp: { value: 0 }, u_flipG: { value: 0 }, u_ch: { value: 0 }, u_invert: { value: 0 },
-    u_value: { value: new THREE.Vector3() }, u_levels: { value: new THREE.Vector3(0, 1, 1) }, u_hsl: { value: new THREE.Vector3() }, u_scale: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_radius: { value: 0 }, u_noise: { value: 0 }, u_noiseScale: { value: 1 }, u_seed: { value: 0 }, u_pos: { value: null }, u_hasPos: { value: 0 }, u_noiseType: { value: 0 }, u_noiseTex: { value: null }, u_nrm: { value: null }, u_hasNrm: { value: 0 },
+    u_value: { value: new THREE.Vector3() }, u_value2: { value: new THREE.Vector3() }, u_levels: { value: new THREE.Vector3(0, 1, 1) }, u_hsl: { value: new THREE.Vector3() }, u_scale: { value: 1 }, u_opacity: { value: 1 }, u_level: { value: 0.5 }, u_spread: { value: 0.1 }, u_radius: { value: 0 }, u_noise: { value: 0 }, u_noiseScale: { value: 1 }, u_seed: { value: 0 }, u_pos: { value: null }, u_hasPos: { value: 0 }, u_noiseType: { value: 0 }, u_noiseTex: { value: null }, u_nrm: { value: null }, u_hasNrm: { value: 0 },
   });
   readonly smear = shader(SMEAR_FS, { u_dst: { value: null }, u_stroke: { value: null }, u_mode: { value: 0 }, u_radius: { value: 0 }, u_offset: { value: new THREE.Vector2() }, u_opacity: { value: 1 } });
   readonly pick = shader(PICK_FS, { u_island: { value: -1 } }, ISLAND_VS, { side: THREE.DoubleSide });
@@ -449,6 +449,13 @@ export class SetGPU {
         u.u_tex!.value = t;
         u.u_scale!.value = it.image.scale;
         u.u_invert!.value = it.image.invert ? 1 : 0;
+      } else if (it.kind === 'procedural' && it.procedural) {
+        const t = image(proceduralRef(it.procedural));
+        if (!t) continue;
+        u.u_src!.value = 3;
+        u.u_tex!.value = t;
+        u.u_scale!.value = it.procedural.scale;
+        u.u_invert!.value = it.procedural.invert ? 1 : 0;
       } else if (it.kind === 'levels' && it.levels) {
         u.u_src!.value = 10;
         (u.u_levels!.value as THREE.Vector3).set(it.levels.low, it.levels.high, it.levels.gamma);
@@ -561,6 +568,8 @@ export class SetGPU {
         if (through) this.p.copyTo(a.texture, inner[0]);
         else this.p.clear(inner[0], c === 'normal' ? [0.5, 0.5, 1, 0] : [...NEUTRAL[c], 0]);
         tex = this.stack(l.children, c, kind, inner, inner[0], depth + 1, ctx).texture;
+        const fx = l.effects?.filter((e) => e.visible && e.opacity > 0) ?? [];
+        if (fx.length) tex = this.content(l, fx, c, kind, ctx, tex)!.texture;
         src = 3;
         if (through) blend = 8;
       } else {
@@ -609,7 +618,7 @@ export class SetGPU {
   }
 
   /** What a layer with effects puts in a channel: its own content, then its effects bottom to top. */
-  private content(l: Layer, fx: Effect[], c: Channel, kind: number, ctx: Ctx): THREE.WebGLRenderTarget | null {
+  private content(l: Layer, fx: Effect[], c: Channel, kind: number, ctx: Ctx, base?: THREE.Texture): THREE.WebGLRenderTarget | null {
     if (!this.fxWork || this.fxWork[0].width !== this.size) {
       this.fxWork?.forEach((t) => t.dispose());
       this.fxWork = [rt(this.size), rt(this.size)];
@@ -628,7 +637,8 @@ export class SetGPU {
     u.u_opacity!.value = 1;
     u.u_flipG!.value = 0;
     u.u_invert!.value = 0;
-    if (l.kind === 'paint') {
+    if (base) this.p.copyTo(base, a);
+    else if (l.kind === 'paint') {
       const t = this.painted(l.id, c, ctx.active);
       if (t) {
         u.u_src!.value = 1;
@@ -682,6 +692,15 @@ export class SetGPU {
         u.u_tex!.value = t;
         u.u_scale!.value = e.image.scale;
         u.u_invert!.value = e.image.invert ? 1 : 0;
+      } else if (e.kind === 'procedural' && e.procedural) {
+        const t = ctx.image(proceduralRef(e.procedural));
+        if (normal || !t) continue;
+        u.u_src!.value = 5;
+        u.u_tex!.value = t;
+        u.u_scale!.value = e.procedural.scale;
+        u.u_invert!.value = e.procedural.invert ? 1 : 0;
+        (u.u_value!.value as THREE.Vector3).set(...hexRgb(e.procedural.colors[0]));
+        (u.u_value2!.value as THREE.Vector3).set(...hexRgb(e.procedural.colors[1]));
       } else if (e.kind === 'levels' && e.levels) {
         if (normal) continue;
         u.u_src!.value = 10;

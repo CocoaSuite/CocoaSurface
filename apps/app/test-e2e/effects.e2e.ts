@@ -256,6 +256,27 @@ test('effects on layers, group masks and blends, fill, smudge and blur tools', a
     await pg.locator('.cs-props .cs-acell[aria-label="Checker"]').click();
     const checker = await rough();
     assert.ok(checker.sd > 40, 'a library pattern in an Image effect');
+
+    // Procedurals, and effects on a group.
+    await pg.locator('.cs-layer').first().click();
+    await pg.getByLabel('New fill layer').click();
+    await field('Roughness', 50);
+    await chip('Procedural');
+    const proc = await rough();
+    assert.ok(proc.sd > 10, 'a procedural on a layer');
+    await pg.locator('.cs-props select').filter({ has: pg.locator('option[value="checker"]') }).selectOption('checker');
+    const checker2 = await rough();
+    assert.ok(checker2.sd > 40 && Math.abs(checker2.sd - proc.sd) > 3, 'changing the pattern changes it');
+    await pg.locator('.cs-layer').first().click();
+    await pg.getByLabel('New group').click();
+    await pg.getByLabel('New fill layer').click();
+    await field('Roughness', 50);
+    await pg.locator('.cs-lr', { hasText: /^Group/ }).first().click();
+    const flat = await rough();
+    await chip('Levels');
+    await field('White point', 60);
+    const lifted = await rough();
+    assert.ok(Math.abs(lifted.mean - flat.mean) > 10, 'an effect on a group changes what its layers make');
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

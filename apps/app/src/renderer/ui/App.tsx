@@ -8,6 +8,7 @@ import { BakeDialog } from './BakeDialog';
 import { ExportDialog } from './ExportDialog';
 import { Layers, addLayer, duplicate, removeCurrentLayer } from './Layers';
 import { Shelf } from './Shelf';
+import { loadLibrary } from '../assets';
 import { Properties } from './Properties';
 import { Start } from './Start';
 import { DisplaySettings, TextureSetList, TextureSetSettings } from './TextureSets';
@@ -87,6 +88,7 @@ export function App() {
 
   useEffect(() => {
     void recover();
+    void loadLibrary();
     const t = setInterval(() => void autosave(), 90_000);
     return () => clearInterval(t);
   }, []);

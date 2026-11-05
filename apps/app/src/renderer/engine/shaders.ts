@@ -148,6 +148,7 @@ uniform int u_vUp;
 uniform int u_flipG;
 uniform int u_ch;
 uniform int u_invert;
+uniform vec3 u_value2;
 uniform vec3 u_value;
 uniform vec3 u_levels;
 uniform vec3 u_hsl;
@@ -214,6 +215,12 @@ void main() {
     s = texture(u_tex, st).rgb;
     if (u_kind == 1) s = vec3(dot(s, vec3(.299, .587, .114)));
     if (u_invert == 1) s = 1. - s;
+  } else if (u_src == 5) {
+    vec2 st = vUv * u_scale;
+    if (u_vUp == 1) st.y = -st.y;
+    float v = texture(u_tex, st).r;
+    if (u_invert == 1) v = 1. - v;
+    s = u_kind == 0 ? mix(u_value, u_value2, v) : vec3(v);
   }
   o = over(B, s, clamp(cov * u_opacity, 0., 1.));
 }`;

@@ -8,17 +8,23 @@ See the README. Baking: normal (from a high-poly model), world normal, position,
 
 Laid out like Substance Painter: menu bar, tool options bar, toolbar on the left (paint, erase, polygon fill, smudge, blur, color picker), viewport in the middle. Panels (Assets, Texture Set List, Texture Set Settings, Display Settings, Layers, Properties) dock: drag a tab onto another panel's tabs to join it, onto its top or bottom to split, or onto an empty edge to start a dock there; splitters resize; Window shows, hides and resets them. The layout is kept in localStorage (`ui/Dock.tsx`). Default: Assets on the left; texture sets, Layers and Properties stacked on the right. Layer rows carry visibility, thumbnail, mask thumbnail, blend and opacity, for the whole layer or for the channel picked above the list (a channel's own setting overrides the layer's, `channelBlend`); right-click for masks and effects. Assets drag from the shelf onto layers, the stack or the viewport. Camera is Alt + left/middle/right drag; Ctrl + right drag sets size and hardness, Ctrl + left drag flow and angle; Shift + click paints a straight line; S + left/middle/right drag turns, moves and scales the stencil.
 
+## Assets, procedurals, export
+
+- Imported alphas, textures and materials are stored in the project (`assets/`, `materials/`, listed in `project.assets` and `project.library`) and in a personal library in IndexedDB (`assets.ts`) that every project sees; a library item is copied into the project when used. Right-click an imported item in Assets to add it to or remove it from the library.
+- Procedural effect (masks and layers): a library noise or pattern with scale, seed, contrast, balance and invert, drawn on the GPU (`proc:` refs in `engine.procTexture`); on layers it goes from a dark to a light color in the color channel. Smart masks include presets (edge wear, chipped edges, dirt, dust, ground grime, thin parts).
+- Groups take effects: they run on what the group's layers make.
+- Export presets (CocoaWorlds, glTF / Blender, Unreal, Unity URP, Godot), packing (separate, ORM, Unity metal-smoothness) and per-map ticks (`export.skip`).
+
 ## Not yet
 
 - Projection and clone tools, 2D view.
 
 - Opening an exported texture-set `.cocoamat` back into a layer stack (the data is written; the import isn't).
-- Brush tip and stencil pictures are kept for the session, not in the project. Tip spacing jitter, scatter and angle following the stroke.
-- Graph editor (materials are edited through their exposed parameters only), procedural generators and smart masks beyond `.cocoamat` graphs.
+- Tip spacing jitter, scatter and angle following the stroke.
+- Graph editor (materials are edited through their exposed parameters only).
 - Baking: cage meshes from a file, bent normals, 16-bit mesh map export.
 - 2D texture view, UV overlap warnings, multiple UV sets (the first UV set is used).
-- Effects on groups (groups take masks, not effects).
-- EXR, TIFF, TGA and 16-bit export; export presets.
+- EXR, TIFF, TGA and 16-bit export.
 - Live link with CocoaWorlds; tested against the CocoaWorlds reader code, not yet inside the running CocoaWorlds editor.
 - Installers and updates.
 

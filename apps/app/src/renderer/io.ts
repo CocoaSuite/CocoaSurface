@@ -1,6 +1,6 @@
 import { encodePng, evaluable, writeCocoaMat, type OutputRole } from '@cocoasurface/materials';
 import {
-  allLayers, pixelOwners, bakedPath, channelInfo, MESH_MAPS, newProject, newTextureSet, pixelPath, PROJECT_EXT, readProject, setMaterial, uid, writeProject, writeSetMaterial,
+  allLayers, packOf, pixelOwners, bakedPath, channelInfo, MESH_MAPS, newProject, newTextureSet, pixelPath, PROJECT_EXT, readProject, setMaterial, uid, writeProject, writeSetMaterial,
   type Channel, type FillLayer, type Project, type TextureSet,
 } from '@cocoasurface/project';
 import { engine } from './engine/engine';
@@ -9,6 +9,7 @@ import { evaluateMaps, forgetMaterial, parseMaterial, type LoadedMaterial } from
 import { loadModel } from './engine/model';
 import { host, isDesktop, MATERIAL_FILTER, MODEL_FILTER, PROJECT_FILTER } from './host';
 import { clearHistory, edit, get, set, toast } from './store';
+import { keepInLibrary } from './assets';
 
 export const APP = 'CocoaSurface 0.1.0';
 let view: { showModel(): void } | null = null;
@@ -99,6 +100,7 @@ async function load(bytes: Uint8Array, path: string | null): Promise<void> {
     }
   } else engine.setModel(null, null);
   engine.clearImages();
+  for (const a of project.assets ?? []) if (files.has(a.file)) await engine.addImage(a.file, files.get(a.file)!);
   for (const t of project.textureSets)
     for (const l of allLayers(t.layers))
       for (const m of [...(l.mask?.items ?? []), ...(l.effects ?? [])])
@@ -208,17 +210,26 @@ export async function recover(): Promise<boolean> {
 
 export async function importMaterials(): Promise<string[]> {
   const files = await host.open([MATERIAL_FILTER], true);
-  const added: string[] = [];
+  const added = await addMaterials(files.map((f) => ({ id: uid(), name: f.name, bytes: f.bytes })));
+  for (const f of files) {
+    const id = added.find((x) => x.name === f.name)?.id;
+    if (id) void keepInLibrary({ id, name: get().materials[id]!.file.manifest.name, kind: 'material', ext: 'cocoamat', bytes: f.bytes });
+  }
+  return added.map((x) => x.id);
+}
+
+/** `.cocoamat` files into the project's materials, under the ids given. */
+export async function addMaterials(files: { id: string; name: string; bytes: Uint8Array }[]): Promise<{ id: string; name: string }[]> {
+  const added: { id: string; name: string }[] = [];
   await busy('Importing materials', async () => {
     const lib = { ...get().materials };
     const entries: Project['library'] = [];
     for (const f of files)
       try {
-        const id = uid();
-        const m = await parseMaterial(id, f.bytes);
-        lib[id] = m;
-        entries.push({ id, name: m.file.manifest.name, file: `materials/${id}.cocoamat` });
-        added.push(id);
+        const m = await parseMaterial(f.id, f.bytes);
+        lib[f.id] = m;
+        entries.push({ id: f.id, name: m.file.manifest.name, file: `materials/${f.id}.cocoamat` });
+        added.push({ id: f.id, name: f.name });
         if (m.unknown.length) toast(`“${m.file.manifest.name}” uses nodes this version doesn't know: ${m.unknown.join(', ')}`);
       } catch (e) {
         toast(`${f.name}: ${(e as Error).message}`);
@@ -232,7 +243,8 @@ export async function importMaterials(): Promise<string[]> {
 
 // Export
 
-const MAP_NAMES: Record<Channel, string> = { color: 'BaseColor', roughness: 'Roughness', metalness: 'Metallic', normal: 'Normal', height: 'Height', occlusion: 'AO', glow: 'Emissive', opacity: 'Opacity' };
+export const PACK_NAMES = { orm: 'OcclusionRoughnessMetallic', unity: 'MetallicSmoothness' } as const;
+export const MAP_NAMES: Record<Channel, string> = { color: 'BaseColor', roughness: 'Roughness', metalness: 'Metallic', normal: 'Normal', height: 'Height', occlusion: 'AO', glow: 'Emissive', opacity: 'Opacity' };
 
 /** A finished channel as image rows (top row first) in standard orientation, normals green up. */
 function mapPixels(t: TextureSet, c: Channel, size: number): Uint8Array | null {
@@ -300,20 +312,37 @@ export async function exportTextures(sets: TextureSet[], meshMaps = false): Prom
         const px = mapPixels(t, c, size);
         if (px) maps.set(c, c === 'normal' && ex.normalGreen === 'down' ? flipGreen(px) : px);
       }
-      if (ex.packOrm && maps.has('roughness') && maps.has('metalness')) {
+      const pack = packOf(ex), skip = new Set(ex.skip ?? []);
+      if (pack === 'orm' && maps.has('roughness') && maps.has('metalness')) {
         const o = maps.get('occlusion'), r = maps.get('roughness')!, m = maps.get('metalness')!;
-        const orm = new Uint8Array(size * size * 3);
-        for (let i = 0; i < size * size; i++) {
-          orm[i * 3] = o ? o[i * 4]! : 255;
-          orm[i * 3 + 1] = r[i * 4]!;
-          orm[i * 3 + 2] = m[i * 4]!;
+        if (!skip.has('pack')) {
+          const orm = new Uint8Array(size * size * 3);
+          for (let i = 0; i < size * size; i++) {
+            orm[i * 3] = o ? o[i * 4]! : 255;
+            orm[i * 3 + 1] = r[i * 4]!;
+            orm[i * 3 + 2] = m[i * 4]!;
+          }
+          await host.writeIn(folder, name(PACK_NAMES.orm), await encodePng(size, size, 3, orm));
+          n++;
         }
-        await host.writeIn(folder, name('OcclusionRoughnessMetallic'), await encodePng(size, size, 3, orm));
-        n++;
         maps.delete('occlusion');
         maps.delete('roughness');
         maps.delete('metalness');
+      } else if (pack === 'unity' && maps.has('roughness') && maps.has('metalness')) {
+        const r = maps.get('roughness')!, m = maps.get('metalness')!;
+        if (!skip.has('pack')) {
+          const ms = new Uint8Array(size * size * 4);
+          for (let i = 0; i < size * size; i++) {
+            ms[i * 4] = ms[i * 4 + 1] = ms[i * 4 + 2] = m[i * 4]!;
+            ms[i * 4 + 3] = 255 - r[i * 4]!;
+          }
+          await host.writeIn(folder, name(PACK_NAMES.unity), await encodePng(size, size, 4, ms));
+          n++;
+        }
+        maps.delete('roughness');
+        maps.delete('metalness');
       }
+      for (const c of skip) maps.delete(c as Channel);
       for (const [c, px] of maps) {
         await host.writeIn(folder, name(MAP_NAMES[c]), await pngOf(c, px, size));
         n++;
@@ -321,6 +350,7 @@ export async function exportTextures(sets: TextureSet[], meshMaps = false): Prom
       const g = engine.sets.get(t.id);
       if (meshMaps && g)
         for (const [m, target] of g.baked) {
+          if (ex.skip?.includes(`mesh:${m}`)) continue;
           const px = imageRows(g.p.read(target), target.width, g.vUp);
           const grey = m === 'occlusion' || m === 'curvature' || m === 'thickness';
           const out = m === 'normal' ? (ex.normalGreen === 'down' ? flipGreen(greenUp(px, g.vUp)) : greenUp(px, g.vUp)) : px;

@@ -300,7 +300,7 @@ export class Viewport {
     }
     const fx = s.effect ? l.effects?.find((x) => x.id === s.effect) : undefined;
     if (fx && fx.kind !== 'paint') return 'Pick a Paint effect to draw on it.';
-    if (!fx && l.kind !== 'paint') return l.kind === 'fill' ? 'Add a Paint effect or a mask to draw on a fill layer.' : 'Groups can’t be painted.';
+    if (!fx && l.kind !== 'paint') return l.kind === 'fill' ? 'Add a Paint effect or a mask to draw on a fill layer.' : 'Add a Paint effect or a mask to draw on a folder.';
     const values = new Map<Key, [number, number, number, number]>();
     for (const c of l.channels) {
       if (!t.channels.includes(c) || c === 'normal' || b.off.includes(c)) continue;
