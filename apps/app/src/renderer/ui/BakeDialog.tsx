@@ -101,6 +101,11 @@ export function BakeDialog({ onClose, draft }: { onClose: () => void; draft?: Ba
           {st.maps.includes('curvature') && (
             <>
               <Field label="Curvature from">{select(st.curvatureFrom, [['mesh', 'Mesh'], ['normal', 'Normal map']], (v) => put('curvatureFrom', v as BakeSettings['curvatureFrom']))}</Field>
+              {st.curvatureFrom === 'mesh' && (
+                <Field label="Edge angle">
+                  <Range value={st.curvatureAngle ?? 35} min={0} max={90} step={1} label="Corners gentler than this are smooth" onChange={(v) => put('curvatureAngle', v)} onCommit={(v) => put('curvatureAngle', v)} />
+                </Field>
+              )}
               {st.curvatureFrom === 'normal' && (
                 <Field label="Strength">
                   <Range value={st.curvatureStrength} min={0.1} max={4} step={0.05} label="Curvature strength" onChange={(v) => put('curvatureStrength', v)} onCommit={(v) => put('curvatureStrength', v)} />

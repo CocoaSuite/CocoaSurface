@@ -533,17 +533,37 @@ uniform sampler2D u_p;
 uniform sampler2D u_island;
 uniform float u_px;
 uniform float u_scale;
+uniform float u_cos;
+uniform float u_reach;
+bool inside(vec2 uv) { return texture(u_island, uv).r > .5; }
 float k(vec2 d) {
   vec2 a = vUv - d, b = vUv + d;
-  if (texture(u_island, a).r < .5 || texture(u_island, b).r < .5) return 0.;
+  if (!inside(a) || !inside(b)) return 0.;
   vec3 dn = texture(u_n, b).xyz - texture(u_n, a).xyz;
   vec3 dp = texture(u_p, b).xyz - texture(u_p, a).xyz;
   float l = dot(dp, dp);
   return l > 1e-14 ? dot(dn, dp) / l : 0.;
 }
+// Smallest cosine between this texel's normal and the normals a short way off on either side.
+float turn(vec3 n, vec2 d) {
+  float c = 1.;
+  if (inside(vUv + d)) c = min(c, dot(n, normalize(texture(u_n, vUv + d).xyz)));
+  if (inside(vUv - d)) c = min(c, dot(n, normalize(texture(u_n, vUv - d).xyz)));
+  return c;
+}
 void main() {
-  float c = .5 * (k(vec2(u_px * 1.5, 0.)) + k(vec2(0., u_px * 1.5)));
-  o = vec4(vec3(.5 + .5 * tanh(c * u_scale)), 1.);
+  float cx = k(vec2(u_px * 1.5, 0.)), cy = k(vec2(0., u_px * 1.5));
+  if (u_cos < .9999 && inside(vUv)) {
+    vec3 n = normalize(texture(u_n, vUv).xyz);
+    vec3 p = texture(u_p, vUv).xyz;
+    float tx = inside(vUv + vec2(u_px, 0.)) ? length(texture(u_p, vUv + vec2(u_px, 0.)).xyz - p) : 0.;
+    float ty = inside(vUv + vec2(0., u_px)) ? length(texture(u_p, vUv + vec2(0., u_px)).xyz - p) : 0.;
+    float t = max(max(tx, ty), 1e-9);
+    float span = clamp(u_reach / t, 1.5, 48.) * u_px;
+    cx *= smoothstep(u_cos + .03, u_cos - .03, turn(n, vec2(span, 0.)));
+    cy *= smoothstep(u_cos + .03, u_cos - .03, turn(n, vec2(0., span)));
+  }
+  o = vec4(vec3(.5 + .5 * tanh(.5 * (cx + cy) * u_scale)), 1.);
 }`;
 
 const CURVE_N_FS = /* glsl */ `
@@ -799,7 +819,7 @@ export async function bakeSet(
     r.clear();
   };
   const quad = (fs: string, u: Record<string, THREE.IUniform>) => new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: QUAD, fragmentShader: fs, uniforms: u, depthTest: false, depthWrite: false });
-  const curve = quad(CURVE_FS, { u_n: { value: null }, u_p: { value: null }, u_island: { value: islandHi.texture }, u_px: { value: 1 / work }, u_scale: { value: 0.12 * diag } });
+  const curve = quad(CURVE_FS, { u_n: { value: null }, u_p: { value: null }, u_island: { value: islandHi.texture }, u_px: { value: 1 / work }, u_scale: { value: 0.12 * diag }, u_cos: { value: Math.cos(((st.curvatureAngle ?? 35) * Math.PI) / 180) }, u_reach: { value: Math.max(0.015, 2.5 * (bevel?.radius ?? 0)) * diag } });
   const curveN = quad(CURVE_N_FS, { u_n: { value: null }, u_island: { value: islandHi.texture }, u_px: { value: ss / work }, u_scale: { value: 2.5 * st.curvatureStrength } });
   const lightMix = quad(LIGHT_MIX_FS, { u_a: { value: null }, u_b: { value: null }, u_divA: { value: 1 }, u_div: { value: 1 }, u_mix: { value: 0 } });
   const denoise = quad(DENOISE_FS, { u_src: { value: null }, u_sp: { value: null }, u_sn: { value: null }, u_island: { value: islandHi.texture }, u_div: { value: 1 }, u_px: { value: 1 / work }, u_step: { value: ss }, u_sigma: { value: 0.006 * diag } });

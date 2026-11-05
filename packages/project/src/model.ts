@@ -87,6 +87,8 @@ export interface BakeSettings {
   /** Curvature from the mesh's shape, or from the baked normal map (picks up high-poly detail). */
   curvatureFrom: 'mesh' | 'normal';
   curvatureStrength: number;
+  /** Mesh curvature ignores corners gentler than this many degrees. */
+  curvatureAngle?: number;
   /** High-poly (or low-poly) meshes, by name, that don't darken anything in occlusion. */
   aoExclude?: string[];
   /** Smooth the noise out of occlusion, thickness and light. */
@@ -115,7 +117,7 @@ export interface Bevel {
 
 export const BEVEL_DEFAULTS: Bevel = { radius: 0.01, samples: 16, edges: 'convex' };
 
-export const BAKE_DEFAULTS: BakeSettings = { size: 2048, maps: ['normal', 'worldNormal', 'position', 'occlusion', 'curvature', 'thickness', 'id'], useHigh: false, front: 0.03, rear: 0.03, aoSamples: 64, aoDistance: 0.2, idFrom: 'material', matchByName: true, autoCage: true, averageNormals: true, meshFirst: true, cages: {}, antialias: 1, curvatureFrom: 'mesh', curvatureStrength: 1 };
+export const BAKE_DEFAULTS: BakeSettings = { size: 2048, maps: ['normal', 'worldNormal', 'position', 'occlusion', 'curvature', 'thickness', 'id'], useHigh: false, front: 0.03, rear: 0.03, aoSamples: 64, aoDistance: 0.2, idFrom: 'material', matchByName: true, autoCage: true, averageNormals: true, meshFirst: true, cages: {}, antialias: 1, curvatureFrom: 'mesh', curvatureStrength: 1, curvatureAngle: 35 };
 
 /** A mask made from a baked mesh map: edges, cavities, thin parts, height or up-facing surfaces. */
 export interface Generator {
