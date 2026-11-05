@@ -97,7 +97,8 @@ test('effects on layers, group masks and blends, fill, smudge and blur tools', a
     await pg.goto(`http://localhost:${srv.address().port}/?inspect`);
     await open(() => pg.getByText('New project from a model…').first().click(), model);
     await pg.waitForSelector('canvas.cs-gl');
-    await pg.locator('.cs-side.l select').first().selectOption('512');
+    await pg.getByRole('button', { name: 'Texture Set Settings' }).click();
+    await pg.locator('.cs-tsets select').first().selectOption('512');
 
     // Effects on a fill layer.
     await pg.getByLabel('New fill layer').click();
@@ -156,12 +157,12 @@ test('effects on layers, group masks and blends, fill, smudge and blur tools', a
     await pg.waitForTimeout(500);
     await toLayer();
     assert.ok(Math.abs((await rough()).mean - 153) < 4, 'a black group mask hides its layers');
-    await pg.locator('.cs-props').getByRole('button', { name: 'Edit the mask' }).click();
+    await pg.locator('.cs-lr', { hasText: 'Group 1' }).getByRole('button', { name: 'Edit the mask' }).click();
     await pg.locator('.cs-props').getByRole('radio', { name: 'White' }).first().click();
     const shownTop = await rough();
     assert.ok(Math.abs(shownTop.mean - 128) < 4, 'a white one shows them');
     await toLayer();
-    await pg.locator('.cs-side.r .cs-props select').first().selectOption('multiply');
+    await pg.locator('select[aria-label="Blend of Group 1"]').selectOption('multiply');
     await pg.waitForTimeout(400);
     const multiplied = await rough();
     assert.ok(Math.abs(multiplied.mean - 77) < 4, 'a multiply group blends as one with the stack');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { duplicateLayer, findLayer, newLayerEffect, pixelOwners, insertLayer, moveLayer, newFillLayer, newGroup, newPaintLayer, newProject, newTextureSet, pixelPath, placeOf, readProject, removeLayer, writeProject } from '../src';
+import { blendIn, duplicateLayer, findLayer, newLayerEffect, pixelOwners, insertLayer, moveLayer, newFillLayer, newGroup, newPaintLayer, newProject, newTextureSet, pixelPath, placeOf, readProject, removeLayer, writeProject } from '../src';
 
 describe('layer stacks', () => {
   const a = newPaintLayer('A', ['color']);
@@ -33,8 +33,10 @@ describe('the project file', () => {
   it('saves and reads back', async () => {
     const p = newProject('Test');
     const set = newTextureSet('Body', ['Body']);
-    const paint = newPaintLayer('Paint', ['color']);
+    const paint = { ...newPaintLayer('Paint', ['color', 'roughness']), channelBlend: { roughness: { blend: 'multiply' as const, opacity: 0.5 } } };
     set.layers.unshift(paint);
+    expect(blendIn(paint, 'roughness')).toEqual({ blend: 'multiply', opacity: 0.5 });
+    expect(blendIn(paint, 'color')).toEqual({ blend: 'normal', opacity: 1 });
     p.textureSets.push(set);
     p.model = { file: 'model/a.obj', name: 'a.obj' };
     p.library.push({ id: 'm1', name: 'Stone', file: 'materials/m1.cocoamat' });

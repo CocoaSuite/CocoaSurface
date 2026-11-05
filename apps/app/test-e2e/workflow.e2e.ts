@@ -83,7 +83,8 @@ test('paint, fill with a material, save, reopen and export', async () => {
     await pg.goto(`http://localhost:${port}/?inspect`);
     await open(() => pg.getByText('New project from a model…').first().click(), model);
     await pg.waitForSelector('canvas.cs-gl');
-    await pg.locator('.cs-side.l select').first().selectOption('512');
+    await pg.getByRole('button', { name: 'Texture Set Settings' }).click();
+    await pg.locator('.cs-tsets select').first().selectOption('512');
     await pg.waitForTimeout(500);
     const base = await stats();
 
@@ -99,8 +100,8 @@ test('paint, fill with a material, save, reopen and export', async () => {
     assert.notEqual(painted.color, base.color, 'painting changes the colour');
 
     await open(() => pg.getByLabel('Import materials').click(), [path.join(fixtures, 'bricks.cocoamat')]);
-    await pg.locator('.cs-mat').first().waitFor();
-    await pg.locator('.cs-mat').first().dblclick();
+    await pg.locator('.cs-shitem').first().waitFor();
+    await pg.locator('.cs-shitem').first().dblclick();
     await pg.waitForTimeout(3000);
     const filled = await stats();
     assert.notEqual(filled.color, painted.color, 'the material fills the layer');
@@ -178,7 +179,8 @@ test('masks: black and white, painted, generated and image items', async () => {
     await pg.goto(`http://localhost:${srv.address().port}/?inspect`);
     await open(() => pg.getByText('New project from a model…').first().click(), model);
     await pg.waitForSelector('canvas.cs-gl');
-    await pg.locator('.cs-side.l select').first().selectOption('512');
+    await pg.getByRole('button', { name: 'Texture Set Settings' }).click();
+    await pg.locator('.cs-tsets select').first().selectOption('512');
     await pg.getByLabel('New fill layer').click();
     const r0 = pg.locator('.cs-props .cs-f', { hasText: 'Roughness' }).locator('input.cs-input').last();
     await r0.fill('0');

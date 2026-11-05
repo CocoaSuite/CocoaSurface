@@ -29,7 +29,7 @@
   - Normal: the high-poly normal in the same cotangent frame the viewer builds from the texture coordinates, so the bake shades the same in the viewport.
   - World normal, position (bounding box 0–1), ID (color per material slot or mesh of the surface hit).
   - Occlusion and thickness: cosine rays over the hemisphere (inward for thickness), 8 rays per pass, added up in a half-float target.
-  - Curvature: from the world normal and position maps (float targets), `dN·dP / |dP|²` in both texture directions, mapped with `tanh`.
+  - Curvature: from the mesh (world normal and position maps, `dN·dP / |dP|²` in both texture directions) or from the baked tangent-space normal map (`∂n.x/∂u + ∂n.y/∂v` over five scales, so high-poly detail shows), mapped with `tanh`.
   - Work is drawn in full-width bands, waiting for each; a band's height doubles while draws take under 30 ms and halves past 120 ms, so fast cards get big draws while the screen stays responsive and the driver's watchdog isn't tripped. It reports progress and can be stopped.
   - With anti-aliasing, occlusion and thickness split their rays between the samples of a texel (they're averaged anyway), so 2× and 4× cost no more rays than 1×. Results are padded 16 texels past UV edges.
   - Baked maps feed the stack: the baked normal is the base of the normal channel (layers add detail on top), baked occlusion multiplies the occlusion channel (and shades the viewport even without it), and layers can take a generated mask from curvature, occlusion, thickness, height or up-facing.

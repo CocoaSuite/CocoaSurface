@@ -34,7 +34,9 @@ export class Viewport {
   private stroke: { set: string; opts: StrokeOptions; last: THREE.Vector2; lazy: THREE.Vector2; carry: number; pressure: number; uv: THREE.Vector2 | null } | null = null;
   private ray = new THREE.Raycaster();
   private queued: THREE.Vector4[] = [];
-  private stencilDrag: { x: number; y: number; sx: number; sy: number } | null = null;
+  private stencilDrag: { b: number; x: number; y: number; st: import('../store').Stencil } | null = null;
+  private adjust: { b: number; x: number; y: number; brush: import('../store').Brush } | null = null;
+  private lastEnd: THREE.Vector2 | null = null;
   private sDown = false;
   private unsub: () => void;
 
@@ -71,7 +73,6 @@ export class Viewport {
       if (s.view !== p.view || s.project !== p.project || s.setId !== p.setId) this.applyView();
       if (s.view.cage !== p.view.cage || s.cagePreview !== p.cagePreview || s.project !== p.project || s.setId !== p.setId) this.showCage();
       if (s.brush.size !== p.brush.size) this.cursor.style.width = this.cursor.style.height = `${s.brush.size}px`;
-      if (s.tool !== p.tool) this.navButtons(false);
     });
     this.resize();
     this.applyView();
@@ -97,8 +98,8 @@ export class Viewport {
   }
 
   private navButtons(alt: boolean): void {
-    const orbit = alt || get().tool === 'orbit';
-    this.controls.mouseButtons = { LEFT: orbit ? THREE.MOUSE.ROTATE : (null as unknown as THREE.MOUSE), MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+    const none = null as unknown as THREE.MOUSE;
+    this.controls.mouseButtons = { LEFT: alt ? THREE.MOUSE.ROTATE : none, MIDDLE: THREE.MOUSE.PAN, RIGHT: alt ? THREE.MOUSE.DOLLY : none };
   }
 
   private resize(): void {
@@ -302,7 +303,7 @@ export class Viewport {
     if (!fx && l.kind !== 'paint') return l.kind === 'fill' ? 'Add a Paint effect or a mask to draw on a fill layer.' : 'Groups can’t be painted.';
     const values = new Map<Key, [number, number, number, number]>();
     for (const c of l.channels) {
-      if (!t.channels.includes(c) || c === 'normal') continue;
+      if (!t.channels.includes(c) || c === 'normal' || b.off.includes(c)) continue;
       const v: Record<string, [number, number, number]> = {
         color: hexRgb(b.color),
         glow: hexRgb(b.glow),
@@ -314,7 +315,7 @@ export class Viewport {
       };
       values.set(c, [...v[c]!, 1]);
     }
-    if (!values.size) return 'The layer paints none of the texture set’s channels.';
+    if (!values.size) return 'No channels are switched on for the brush.';
     return { set: t.id, opts: { key: 'color', layer: fx?.id ?? l.id, values, opacity: b.opacity, erase } };
   }
 
@@ -375,18 +376,18 @@ export class Viewport {
 
   private bindInput(): void {
     const el = this.r.domElement;
+    const typing = (e: Event) => !!(e.target as HTMLElement).closest?.('input, textarea, select');
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     el.addEventListener('pointerleave', () => (this.cursor.style.display = 'none'));
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Alt') this.navButtons(true);
-      if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey && !(e.target as HTMLElement).closest?.('input, textarea, select')) this.sDown = true;
+      if (e.key === 'Alt') (this.navButtons(true), e.preventDefault());
+      if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey && !typing(e)) this.sDown = true;
     });
     window.addEventListener('keyup', (e) => {
       if (e.key === 'Alt') this.navButtons(false);
       if (e.code === 'KeyS') this.sDown = false;
     });
     window.addEventListener('blur', () => (this.navButtons(false), (this.sDown = false)));
-    // S and drag moves the stencil, S and the wheel scales it.
     el.addEventListener('wheel', (e) => {
       const st = get().stencil;
       if (!this.sDown || !st) return;
@@ -394,35 +395,52 @@ export class Viewport {
       e.stopImmediatePropagation();
       useApp.setState({ stencil: { ...st, scale: Math.max(0.02, Math.min(10, st.scale * (e.deltaY < 0 ? 1.08 : 1 / 1.08))) } });
     }, { capture: true, passive: false });
-    // Shift and right-drag turns the light around the model.
-    el.addEventListener('pointerdown', (e) => {
-      if (e.button !== 2 || !e.shiftKey) return;
+    const grab = (e: PointerEvent) => {
       e.stopImmediatePropagation();
       this.controls.enabled = false;
       el.setPointerCapture(e.pointerId);
-      this.lightDrag = { x: e.clientX, turn: get().view.turn };
-    }, { capture: true });
-    el.addEventListener('pointermove', (e) => {
-      const d = this.lightDrag;
-      if (!d) return;
-      const turn = (((d.turn + (e.clientX - d.x) * 0.5) % 360) + 360) % 360;
-      useApp.setState((s) => ({ view: { ...s.view, turn } }));
-    });
-    const endLight = () => {
-      if (!this.lightDrag) return;
-      this.lightDrag = null;
-      this.controls.enabled = true;
     };
-    el.addEventListener('pointerup', endLight);
-    el.addEventListener('pointercancel', endLight);
     el.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0 || e.altKey || get().tool === 'orbit') return;
+      if (e.altKey) return;
       const st = get().stencil;
       if (this.sDown && st) {
-        el.setPointerCapture(e.pointerId);
-        this.stencilDrag = { x: e.clientX, y: e.clientY, sx: st.x, sy: st.y };
+        grab(e);
+        this.stencilDrag = { b: e.button, x: e.clientX, y: e.clientY, st };
+      } else if (e.ctrlKey && (e.button === 0 || e.button === 2)) {
+        grab(e);
+        this.adjust = { b: e.button, x: e.clientX, y: e.clientY, brush: get().brush };
+      } else if (e.shiftKey && e.button === 2) {
+        grab(e);
+        this.lightDrag = { x: e.clientX, turn: get().view.turn };
+      }
+    }, { capture: true });
+    el.addEventListener('pointermove', (e) => {
+      const b = el.getBoundingClientRect();
+      const sd = this.stencilDrag, ad = this.adjust, ld = this.lightDrag;
+      if (sd) {
+        const dx = e.clientX - sd.x, dy = e.clientY - sd.y;
+        const st = sd.b === 1 ? { x: sd.st.x + dx / b.width, y: sd.st.y + dy / b.height } : sd.b === 2 ? { scale: Math.max(0.02, Math.min(10, sd.st.scale * Math.exp(dx / 200))) } : { angle: (((sd.st.angle - dx * 0.5) % 360) + 360) % 360 };
+        useApp.setState((s) => ({ stencil: s.stencil && { ...s.stencil, ...st } }));
         return;
       }
+      if (ad) {
+        const dx = e.clientX - ad.x, dy = ad.y - e.clientY, k = (v: number) => Math.min(1, Math.max(0, v));
+        const v = ad.b === 2 ? { size: Math.round(Math.min(1000, Math.max(1, ad.brush.size * Math.exp(dx / 150)))), hardness: k(ad.brush.hardness + dy / 200) } : { flow: k(ad.brush.flow + dx / 200), angle: (((ad.brush.angle + dy) % 360) + 360) % 360 };
+        useApp.setState((s) => ({ brush: { ...s.brush, ...v } }));
+        return;
+      }
+      if (ld) {
+        const turn = (((ld.turn + (e.clientX - ld.x) * 0.5) % 360) + 360) % 360;
+        useApp.setState((s) => ({ view: { ...s.view, turn } }));
+        return;
+      }
+      this.cursor.style.transform = `translate(${e.clientX - b.left}px, ${e.clientY - b.top}px)`;
+      this.cursor.style.display = get().tool === 'picker' ? 'none' : 'block';
+      if (this.stroke) for (const ev of e.getCoalescedEvents?.() ?? [e]) this.paintTo(this.screen(ev), pressureOf(ev));
+    });
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.altKey) return;
+      if (get().tool === 'picker') return this.pick(e);
       const t = this.strokeTarget();
       if (typeof t === 'string') return toast(t);
       const g = engine.sets.get(t.set)!;
@@ -433,31 +451,55 @@ export class Viewport {
       g.beginStroke();
       const at = this.screen(e);
       const pr = pressureOf(e);
-      this.stroke = { ...t, last: at, lazy: at.clone(), carry: 0, pressure: pr, uv: this.hit(at.x, at.y)?.uv?.clone() ?? null };
+      const from = e.shiftKey && this.lastEnd ? this.lastEnd.clone() : at;
+      this.stroke = { ...t, last: from, lazy: at.clone(), carry: 0, pressure: pr, uv: this.hit(at.x, at.y)?.uv?.clone() ?? null };
       engine.active = { set: t.set, layer: t.opts.layer, keys: [...t.opts.values.keys()] };
       this.paintTo(at, pr, true);
     });
-    el.addEventListener('pointermove', (e) => {
-      const b = el.getBoundingClientRect();
-      const sd = this.stencilDrag, st = get().stencil;
-      if (sd && st) {
-        useApp.setState({ stencil: { ...st, x: sd.sx + (e.clientX - sd.x) / b.width, y: sd.sy + (e.clientY - sd.y) / b.height } });
+    const end = () => {
+      if (this.stencilDrag || this.adjust || this.lightDrag) {
+        this.stencilDrag = this.adjust = this.lightDrag = null;
+        this.controls.enabled = true;
         return;
       }
-      this.cursor.style.transform = `translate(${e.clientX - b.left}px, ${e.clientY - b.top}px)`;
-      this.cursor.style.display = get().tool === 'orbit' ? 'none' : 'block';
-      if (this.stroke) for (const ev of e.getCoalescedEvents?.() ?? [e]) this.paintTo(this.screen(ev), pressureOf(ev));
-    });
-    const end = () => {
-      this.stencilDrag = null;
       const st = this.stroke;
       if (!st) return;
       this.flush();
+      this.lastEnd = st.last.clone();
       this.stroke = null;
       this.finish(st);
     };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
+  }
+
+  /** Takes every channel's value under the pointer into the brush. */
+  private pick(e: PointerEvent): void {
+    const at = this.screen(e);
+    const hit = this.hit(at.x, at.y);
+    const m = engine.model;
+    const part = hit && m ? m.parts.findIndex((p) => p.mesh === hit.object) : -1;
+    if (!hit?.uv || part < 0) return;
+    const g = [...engine.sets.values()].find((x) => x.parts.includes(part));
+    if (!g) return;
+    const px = new Uint8Array(4);
+    const read = (c: Channel) => {
+      const t = g.display.get(c);
+      if (!t) return null;
+      const x = Math.floor((((hit.uv!.x % 1) + 1) % 1) * t.width), y = Math.floor((((hit.uv!.y % 1) + 1) % 1) * t.height);
+      this.r.readRenderTargetPixels(t, x, y, 1, 1, px);
+      return [px[0]!, px[1]!, px[2]!];
+    };
+    const hex = (v: number[]) => '#' + v.map((n) => n.toString(16).padStart(2, '0')).join('');
+    const b: Partial<import('../store').Brush> = {};
+    const c = read('color'), r = read('roughness'), mt = read('metalness'), h = read('height'), gl = read('glow');
+    if (c) b.color = hex(c);
+    if (r) b.roughness = r[0]! / 255;
+    if (mt) b.metalness = mt[0]! / 255;
+    if (h) b.height = h[0]! / 255;
+    if (gl) b.glow = hex(gl);
+    if (c && get().maskItem) b.maskValue = (c[0]! * 0.3 + c[1]! * 0.59 + c[2]! * 0.11) / 255;
+    useApp.setState((s) => ({ brush: { ...s.brush, ...b } }));
   }
 
   /** The stroke becomes part of its layer, as one undo step. */

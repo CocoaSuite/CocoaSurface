@@ -52,6 +52,16 @@ export function BakeDialog({ onClose }: { onClose: () => void }) {
               </Field>
             </>
           )}
+          {st.maps.includes('curvature') && (
+            <>
+              <Field label="Curvature from">{select(st.curvatureFrom, [['mesh', 'Mesh'], ['normal', 'Normal map']], (v) => put('curvatureFrom', v as BakeSettings['curvatureFrom']))}</Field>
+              {st.curvatureFrom === 'normal' && (
+                <Field label="Strength">
+                  <Range value={st.curvatureStrength} min={0.1} max={4} step={0.05} label="Curvature strength" onChange={(v) => put('curvatureStrength', v)} onCommit={(v) => put('curvatureStrength', v)} />
+                </Field>
+              )}
+            </>
+          )}
           {st.maps.includes('id') && <Field label="ID colors">{select(st.idFrom, [['material', 'By material'], ['mesh', 'By mesh']], (v) => put('idFrom', v as BakeSettings['idFrom']))}</Field>}
           <div className="cs-sec">
             <span>Bevel shader</span>

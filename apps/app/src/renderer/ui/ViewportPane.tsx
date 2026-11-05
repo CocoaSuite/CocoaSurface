@@ -1,21 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { Button, IconButton } from '@cocoasurface/ui';
+import { applyItem, isShelfDrag, shelfItem, useMaterial } from './Shelf';
 import { CHANNELS, MESH_MAPS } from '@cocoasurface/project';
-import { Viewport, type CameraView } from '../engine/viewport';
+import { Viewport } from '../engine/viewport';
 import { setView } from '../io';
 import { engine } from '../engine/engine';
 import { currentSet, set, useApp, type ViewMode } from '../store';
 
 let current: Viewport | null = null;
 export const viewport = () => current;
-
-const VIEWS: { v: CameraView; label: string }[] = [
-  { v: 'front', label: 'Front' },
-  { v: 'back', label: 'Back' },
-  { v: 'left', label: 'Left' },
-  { v: 'right', label: 'Right' },
-  { v: 'top', label: 'Top' },
-];
 
 export function ViewportPane() {
   const ref = useRef<HTMLDivElement>(null);
@@ -42,24 +35,25 @@ export function ViewportPane() {
 
   useEffect(() => {
     const el = current?.r.domElement;
-    if (el) el.style.cursor = useApp.getState().tool === 'orbit' ? 'grab' : 'crosshair';
+    if (el) el.style.cursor = useApp.getState().tool === 'picker' ? 'copy' : 'crosshair';
   });
 
   return (
-    <div className="cs-view" ref={ref}>
+    <div
+      className="cs-view"
+      ref={ref}
+      onDragOver={(e) => isShelfDrag(e) && e.preventDefault()}
+      onDrop={(e) => {
+        const item = shelfItem(e);
+        if (!item) return;
+        e.preventDefault();
+        if (item.kind === 'material') useMaterial(item.id, useApp.getState().layerId, false);
+        else applyItem(item);
+      }}
+    >
       {stencil && stencilUrl && (
         <img className="cs-stencil" src={stencilUrl} alt="" style={{ left: `${stencil.x * 100}%`, top: `${stencil.y * 100}%`, width: `${stencil.scale * 100}%`, transform: `translate(-50%, -50%) rotate(${-stencil.angle}deg)` }} />
       )}
-      <div className="cs-axes">
-        {VIEWS.map((x) => (
-          <Button key={x.v} size="sm" onClick={() => current?.look(x.v)}>
-            {x.label}
-          </Button>
-        ))}
-        <Button size="sm" onClick={() => current?.frame()}>
-          Frame
-        </Button>
-      </div>
       <div className="cs-overlay">
         <select className="cs-select" aria-label="Show" value={view.mode} onChange={(e) => set((s) => ({ view: { ...s.view, mode: e.target.value as ViewMode } }))}>
           <option value="material">Material</option>
@@ -80,12 +74,6 @@ export function ViewportPane() {
           <option value="bake:skew">Skew (bake)</option>
           <option value="bake:offset">Offset (bake)</option>
         </select>
-        <Button size="sm" aria-pressed={view.ortho} onClick={() => set((s) => ({ view: { ...s.view, ortho: !s.view.ortho } }))}>
-          {view.ortho ? 'Orthographic' : 'Perspective'}
-        </Button>
-        <Button size="sm" aria-pressed={view.wire} onClick={() => set((s) => ({ view: { ...s.view, wire: !s.view.wire } }))}>
-          Wireframe
-        </Button>
       </div>
       {busy && <div className="cs-busy">{busy}…</div>}
       {job && (

@@ -387,6 +387,29 @@ void main() {
   o = vec4(vec3(.5 + .5 * tanh(c * u_scale)), 1.);
 }`;
 
+const CURVE_N_FS = /* glsl */ `
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D u_n;
+uniform sampler2D u_island;
+uniform float u_px;
+uniform float u_scale;
+vec2 nrm(vec2 uv, vec2 f) {
+  return texture(u_island, uv).r < .5 ? f : texture(u_n, uv).xy * 2. - 1.;
+}
+void main() {
+  vec2 f = nrm(vUv, vec2(0.));
+  float c = 0., w = 0.;
+  for (int i = 0; i < 5; i++) {
+    float d = u_px * exp2(float(i));
+    float k = 1. / exp2(float(i) * .5);
+    c += k * (nrm(vUv + vec2(d, 0.), f).x - nrm(vUv - vec2(d, 0.), f).x + nrm(vUv + vec2(0., d), f).y - nrm(vUv - vec2(0., d), f).y);
+    w += k;
+  }
+  o = vec4(vec3(.5 + .5 * tanh(c / w * u_scale)), 1.);
+}`;
+
 /** Down to the map's size (averaging the samples inside the UV islands), padded past the island edges. */
 const ENCODE_FS = /* glsl */ `
 precision highp float;
@@ -531,7 +554,8 @@ export async function bakeSet(
 
   type Pass = { out: string; mode: number; seed: number; reads?: string[] };
   const passes: Pass[] = [{ out: 'sp', mode: 7, seed: 0 }, { out: 'sn', mode: 8, seed: 0 }];
-  if (want.has('normal')) passes.push({ out: 'normal', mode: 1, seed: 0 });
+  const fromNormal = want.has('curvature') && st.curvatureFrom === 'normal';
+  if (want.has('normal') || fromNormal) passes.push({ out: 'normal', mode: 1, seed: 0 });
   if (want.has('position')) passes.push({ out: 'position', mode: 3, seed: 0 });
   if (want.has('id')) passes.push({ out: 'id', mode: 4, seed: 0 });
   // Anti-aliasing averages ss² samples per texel, so occlusion and thickness split their rays between them.
@@ -550,12 +574,13 @@ export async function bakeSet(
   };
   const quad = (fs: string, u: Record<string, THREE.IUniform>) => new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: QUAD, fragmentShader: fs, uniforms: u, depthTest: false, depthWrite: false });
   const curve = quad(CURVE_FS, { u_n: { value: null }, u_p: { value: null }, u_island: { value: islandHi.texture }, u_px: { value: 1 / work }, u_scale: { value: 0.12 * diag } });
+  const curveN = quad(CURVE_N_FS, { u_n: { value: null }, u_island: { value: islandHi.texture }, u_px: { value: ss / work }, u_scale: { value: 2.5 * st.curvatureStrength } });
   const enc = quad(ENCODE_FS, { u_src: { value: null }, u_islandHi: { value: islandHi.texture }, u_island: { value: island.texture }, u_px: { value: 1 / size }, u_div: { value: 1 }, u_ss: { value: ss }, u_kind: { value: 0 } });
   try {
     // Build every program before the heavy drawing starts.
     const warm = new THREE.WebGLRenderTarget(1, 1, { type: THREE.FloatType, depthBuffer: false });
     for (const m of stages) if (m !== stages[2] || bevel) g.drawWith(m, warm);
-    g.p.run(curve, warm);
+    g.p.run(fromNormal ? curveN : curve, warm);
     g.p.run(enc, warm);
     r.readRenderTargetPixels(warm, 0, 0, 1, 1, new Float32Array(4));
     warm.dispose();
@@ -611,9 +636,14 @@ export async function bakeSet(
     }
     if (want.has('curvature')) {
       const t = float();
-      curve.uniforms.u_n!.value = raw.get('sn')!.texture;
-      curve.uniforms.u_p!.value = raw.get('sp')!.texture;
-      g.p.run(curve, t);
+      if (fromNormal) {
+        curveN.uniforms.u_n!.value = raw.get('normal')!.texture;
+        g.p.run(curveN, t);
+      } else {
+        curve.uniforms.u_n!.value = raw.get('sn')!.texture;
+        curve.uniforms.u_p!.value = raw.get('sp')!.texture;
+        g.p.run(curve, t);
+      }
       raw.set('curvature', t);
     }
     if (want.has('worldNormal')) raw.set('worldNormal', raw.get('sn')!);
@@ -634,6 +664,7 @@ export async function bakeSet(
     for (const t of new Set([...raw.values(), ...pool])) t.dispose();
     stages.forEach((m) => m.dispose());
     curve.dispose();
+    curveN.dispose();
     enc.dispose();
     zero.dispose();
     half.dispose();

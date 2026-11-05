@@ -81,6 +81,9 @@ export interface BakeSettings {
   averageNormals: boolean;
   /** Samples per texel side: 1, 2 or 4. */
   antialias: 1 | 2 | 4;
+  /** Curvature from the mesh's shape, or from the baked normal map (picks up high-poly detail). */
+  curvatureFrom: 'mesh' | 'normal';
+  curvatureStrength: number;
 }
 
 /** Rounds hard edges in the baked maps, as if they were bevelled, by blending normals of nearby surfaces. */
@@ -93,7 +96,7 @@ export interface Bevel {
 
 export const BEVEL_DEFAULTS: Bevel = { radius: 0.01, samples: 16, edges: 'convex' };
 
-export const BAKE_DEFAULTS: BakeSettings = { size: 2048, maps: ['normal', 'worldNormal', 'position', 'occlusion', 'curvature', 'thickness', 'id'], useHigh: false, front: 0.03, rear: 0.03, aoSamples: 64, aoDistance: 0.2, idFrom: 'material', matchByName: true, autoCage: true, averageNormals: true, cages: {}, antialias: 1 };
+export const BAKE_DEFAULTS: BakeSettings = { size: 2048, maps: ['normal', 'worldNormal', 'position', 'occlusion', 'curvature', 'thickness', 'id'], useHigh: false, front: 0.03, rear: 0.03, aoSamples: 64, aoDistance: 0.2, idFrom: 'material', matchByName: true, autoCage: true, averageNormals: true, cages: {}, antialias: 1, curvatureFrom: 'mesh', curvatureStrength: 1 };
 
 /** A mask made from a baked mesh map: edges, cavities, thin parts, height or up-facing surfaces. */
 export interface Generator {
@@ -137,6 +140,8 @@ interface LayerBase {
   locked: boolean;
   opacity: number;
   blend: BlendMode;
+  /** Blend and opacity of single channels, in place of the layer's. */
+  channelBlend?: Partial<Record<Channel, { blend: BlendMode; opacity: number }>>;
   /** The channels this layer changes. */
   channels: Channel[];
   /** Where the layer shows: white shows it, black hides it. */
@@ -324,4 +329,9 @@ export const newGroup = (name: string, channels: Channel[]): GroupLayer => ({ ..
 
 export function newTextureSet(name: string, slots: string[], size: TextureSize = 2048): TextureSet {
   return { id: uid(), name, slots, size, channels: [...DEFAULT_CHANNELS], layers: [newFillLayer('Base', DEFAULT_CHANNELS)] };
+}
+
+/** How a layer blends into one channel: its own setting for the channel, or the layer's. */
+export function blendIn(l: { blend: BlendMode; opacity: number; channelBlend?: Partial<Record<Channel, { blend: BlendMode; opacity: number }>> }, c: Channel): { blend: BlendMode; opacity: number } {
+  return l.channelBlend?.[c] ?? { blend: l.blend, opacity: l.opacity };
 }

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
-import { BLEND_MODES, GENERATOR_SOURCES, MASK_BLENDS, NOISE_TYPES, type Effect, type FlatValues, type Mask, channelInfo, type Channel, type FillLayer, type Layer, type TextureSet } from '@cocoasurface/project';
+import { BLEND_MODES, blendIn, GENERATOR_SOURCES, MASK_BLENDS, NOISE_TYPES, type Effect, type FlatValues, type Mask, channelInfo, type Channel, type FillLayer, type Layer, type TextureSet } from '@cocoasurface/project';
 import type { Part } from './model';
 import type { RoleTextures } from './library';
 import { COMMIT_FS, COPY_FS, DAB_FS, DIST_FS, DIST_VS, EFFECT_FS, FILL_FS, FINAL_FS, ISLAND_FS, ISLAND_VS, LAYER_FS, MASK_FS, MAX_DABS, PICK_FS, QUAD_VS, SMEAR_FS, UV_VS } from './shaders';
@@ -549,14 +549,15 @@ export class SetGPU {
   private stack(layers: Layer[], c: Channel, kind: number, pair: [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget], a: THREE.WebGLRenderTarget, depth: number, ctx: Ctx): THREE.WebGLRenderTarget {
     const u = this.p.layer.uniforms;
     for (const l of [...layers].reverse()) {
-      if (!l.visible || l.opacity <= 0) continue;
+      const own = blendIn(l, c);
+      if (!l.visible || own.opacity <= 0) continue;
       const b = a === pair[0] ? pair[1] : pair[0];
-      let src: 0 | 1 | 2 | 3, tex: THREE.Texture | null = null, blend = BLEND_MODES.findIndex((m) => m.value === l.blend);
+      let src: 0 | 1 | 2 | 3, tex: THREE.Texture | null = null, blend = BLEND_MODES.findIndex((m) => m.value === own.blend);
       u.u_flipG!.value = 0;
       if (l.kind === 'group') {
         // Normal groups pass through: their layers blend with what's below, then the mask and opacity mix that in.
         const inner = this.level(depth + 1);
-        const through = l.blend === 'normal';
+        const through = own.blend === 'normal';
         if (through) this.p.copyTo(a.texture, inner[0]);
         else this.p.clear(inner[0], c === 'normal' ? [0.5, 0.5, 1, 0] : [...NEUTRAL[c], 0]);
         tex = this.stack(l.children, c, kind, inner, inner[0], depth + 1, ctx).texture;
@@ -590,7 +591,7 @@ export class SetGPU {
       u.u_below!.value = a.texture;
       u.u_kind!.value = kind;
       u.u_blend!.value = blend;
-      u.u_opacity!.value = l.opacity;
+      u.u_opacity!.value = own.opacity;
       u.u_vUp!.value = this.vUp ? 1 : 0;
       u.u_src!.value = src;
       u.u_tex!.value = tex;

@@ -1,7 +1,7 @@
 import { Button, Field, IconButton, NumberField, PanelHeader, Section, Segmented, Switch } from '@cocoasurface/ui';
 import { engine } from '../engine/engine';
 import { host } from '../host';
-import { MASK_ROOT, setMask } from './Layers';
+import { MASK_ROOT, addEffect, setMask } from './Layers';
 import { BLEND_MODES, CHANNELS, EFFECT_KINDS, GENERATOR_SOURCES, NOISE_LABELS, NOISE_TYPES, type NoiseType, MASK_BLENDS, newLayerEffect, newMaskItem, uid, updateLayer, type BlendMode, type Effect, type EffectKind, type FillLayer, type FlatValues, type Generator, type Layer, type TextureSet } from '@cocoasurface/project';
 import type { Parameter } from '@cocoasurface/materials';
 import type { LoadedMaterial } from '../engine/library';
@@ -100,9 +100,15 @@ function FillProps({ l }: { l: FillLayer }) {
   const materials = useApp((s) => s.materials);
   const m = l.use ? materials[l.use.material] : undefined;
   const flat = (k: keyof FlatValues, v: unknown, gesture: boolean) => change(l, `Change ${l.name}`, (x) => ({ ...(x as FillLayer), flat: { ...(x as FillLayer).flat, [k]: v } }), gesture);
+  const t = currentSet()!;
   return (
     <>
-      <Section title="Fill" />
+      <Section title="Material" />
+      <Chips
+        options={CHANNELS.filter((c) => t.channels.includes(c.id)).map((c) => ({ value: c.id, label: c.label }))}
+        value={l.channels}
+        onChange={(v) => change(l, `Change channels of ${l.name}`, (x) => ({ ...x, channels: v }))}
+      />
       <Field label="Material">
         <select
           className="cs-select"
@@ -124,10 +130,11 @@ function FillProps({ l }: { l: FillLayer }) {
       {l.use && m ? (
         <>
           {m.unknown.length > 0 && <span className="cs-note warn">This material uses nodes this version doesn't know ({m.unknown.join(', ')}). They may look different here than in CocoaWorlds.</span>}
+          <Section title="Fill" />
           <Field label="Repeat">
             <Range value={l.use.scale} min={0.25} max={16} step={0.25} label="Repeat" onChange={(v) => change(l, 'Change repeat', (x) => ({ ...(x as FillLayer), use: { ...(x as FillLayer).use!, scale: v } }), true)} onCommit={() => commit('Change repeat')} />
           </Field>
-          {m.file.manifest.parameters.length ? <Section title="Parameters" /> : <span className="cs-note">The material has no exposed parameters.</span>}
+          {m.file.manifest.parameters.length ? <Section title="Material parameters" /> : <span className="cs-note">The material has no exposed parameters.</span>}
           {m.file.manifest.parameters.map((p) => (
             <Param key={p.id} p={p} m={m} l={l} />
           ))}
@@ -159,18 +166,10 @@ function putList(l: Layer, w: Where, label: string, f: (items: Effect[]) => Effe
 }
 
 function AddEffect({ l, w }: { l: Layer; w: Where }) {
-  const sel = useApp((s) => (w === 'mask' ? s.maskItem : s.effect));
-  const add = (kind: EffectKind) => {
-    const n = w === 'mask' ? newMaskItem(kind) : newLayerEffect(kind, kind === 'fill' && l.kind === 'fill' ? { flat: { ...l.flat } } : {});
-    const items = listOf(l, w);
-    const at = Math.max(0, items.findIndex((x) => x.id === sel));
-    putList(l, w, `Add ${n.name}`, (xs) => [...xs.slice(0, at), n, ...xs.slice(at)]);
-    set(w === 'mask' ? { maskItem: n.id } : { effect: n.id, maskItem: null });
-  };
   return (
     <div className="cs-checks">
       {EFFECT_KINDS.filter((x) => w === 'layer' || x.mask).map((x) => (
-        <button key={x.kind} type="button" className="cs-chip" onClick={() => add(x.kind)}>
+        <button key={x.kind} type="button" className="cs-chip" onClick={() => addEffect(l, w, x.kind)}>
           {x.label}
         </button>
       ))}
@@ -380,21 +379,23 @@ function TipProps() {
     f(x.name, await engine.addToolImage(x.name, x.bytes));
   };
   const st = (v: Partial<NonNullable<typeof stencil>>) => set((s) => ({ stencil: s.stencil && { ...s.stencil, ...v } }));
+  const r = (k: 'size' | 'flow' | 'opacity' | 'spacing' | 'hardness', label: string, max: number) => (
+    <Field label={label}>
+      <Range value={k === 'size' ? b.size : b[k]} min={k === 'size' ? 1 : 0} max={max} step={k === 'size' ? 1 : 0.01} label={label} onChange={(v) => put({ [k]: v })} onCommit={() => {}} />
+    </Field>
+  );
   return (
     <>
-      <Section title="Brush tip" />
+      <Section title="Brush" />
+      {r('size', 'Size', 1000)}
+      {r('flow', 'Flow', 1)}
+      {r('opacity', 'Stroke opacity', 1)}
+      {r('spacing', 'Spacing', 2)}
+      {r('hardness', 'Hardness', 1)}
       {tool === 'fill' && (
         <Field label="Fills">
           <Segmented label="Fills" options={[{ value: 'island', label: 'UV island' }, { value: 'mesh', label: 'Mesh' }]} value={b.fillBy} onChange={(v) => put({ fillBy: v as Brush['fillBy'] })} />
         </Field>
-      )}
-      <Field label="Shape">
-        <Segmented label="Shape" options={[{ value: 'round', label: 'Round' }, { value: 'square', label: 'Square' }, { value: 'image', label: 'Picture' }]} value={b.shape} onChange={(v) => put({ shape: v as Brush['shape'] })} />
-      </Field>
-      {b.shape === 'image' && (
-        <Row label="Picture">
-          <AssetPicker value={b.alpha} name={b.alpha ?? undefined} start="alpha" onPick={(ref) => put({ alpha: ref })} onFile={() => void pick((name) => put({ alpha: name }))} />
-        </Row>
       )}
       <Field label="Angle">
         <Range value={b.angle} min={0} max={360} step={1} label="Angle" onChange={(v) => put({ angle: v })} onCommit={() => {}} />
@@ -407,9 +408,18 @@ function TipProps() {
           <option value="both">Size and flow</option>
         </select>
       </Field>
-      <Field label="Stabiliser">
-        <Range value={b.stabilize} min={0} max={100} step={1} label="Stabiliser" onChange={(v) => put({ stabilize: v })} onCommit={() => {}} />
+      <Field label="Lazy mouse">
+        <Range value={b.stabilize} min={0} max={100} step={1} label="Lazy mouse" onChange={(v) => put({ stabilize: v })} onCommit={() => {}} />
       </Field>
+      <Section title="Alpha" />
+      <Field label="Shape">
+        <Segmented label="Shape" options={[{ value: 'round', label: 'Round' }, { value: 'square', label: 'Square' }, { value: 'image', label: 'Picture' }]} value={b.shape} onChange={(v) => put({ shape: v as Brush['shape'] })} />
+      </Field>
+      {b.shape === 'image' && (
+        <Row label="Picture">
+          <AssetPicker value={b.alpha} name={b.alpha ?? undefined} start="alpha" onPick={(ref) => put({ alpha: ref })} onFile={() => void pick((name) => put({ alpha: name }))} />
+        </Row>
+      )}
       <Section title="Stencil" />
       <Row label="Picture">
         <AssetPicker
@@ -442,14 +452,31 @@ function TipProps() {
 
 function BrushProps({ l }: { l: Layer }) {
   const b = useApp((s) => s.brush);
+  const t = currentSet()!;
   const put = (k: keyof Brush, v: unknown) => set((s) => ({ brush: { ...s.brush, [k]: v } }));
-  const has = (c: string) => l.channels.includes(c as never);
+  const chans = CHANNELS.filter((c) => c.id !== 'normal' && t.channels.includes(c.id));
+  const on = chans.filter((c) => l.channels.includes(c.id) && !b.off.includes(c.id)).map((c) => c.id);
+  const has = (c: string) => on.includes(c as never);
   return (
     <>
-      <Section title="Brush" />
+      <Section title="Material" />
+      <Chips
+        options={chans.map((c) => ({ value: c.id, label: c.label }))}
+        value={on}
+        onChange={(v) => {
+          const add = v.filter((c) => !l.channels.includes(c));
+          if (add.length) change(l, `Change channels of ${l.name}`, (x) => ({ ...x, channels: [...x.channels, ...add] }));
+          put('off', chans.map((c) => c.id).filter((c) => !v.includes(c)));
+        }}
+      />
       {has('color') && (
         <Field label="Color">
           <Color value={b.color} label="Brush color" onChange={(v) => put('color', v)} onCommit={() => {}} />
+        </Field>
+      )}
+      {has('height') && (
+        <Field label="Height">
+          <Range value={b.height} min={0} max={1} label="Brush height" onChange={(v) => put('height', v)} onCommit={() => {}} />
         </Field>
       )}
       {has('roughness') && (
@@ -462,11 +489,6 @@ function BrushProps({ l }: { l: Layer }) {
           <Range value={b.metalness} min={0} max={1} label="Brush metal" onChange={(v) => put('metalness', v)} onCommit={() => {}} />
         </Field>
       )}
-      {has('height') && (
-        <Field label="Height">
-          <Range value={b.height} min={0} max={1} label="Brush height" onChange={(v) => put('height', v)} onCommit={() => {}} />
-        </Field>
-      )}
       {has('glow') && (
         <Field label="Glow">
           <Color value={b.glow} label="Brush glow" onChange={(v) => put('glow', v)} onCommit={() => {}} />
@@ -476,9 +498,12 @@ function BrushProps({ l }: { l: Layer }) {
   );
 }
 
+const TOOL_NAMES = { paint: 'Paint', erase: 'Eraser', fill: 'Polygon fill', smudge: 'Smudge', blur: 'Blur', picker: 'Color picker' } as const;
+
 export function Properties() {
   useApp((s) => s.project);
   useApp((s) => s.layerId);
+  const tool = useApp((s) => s.tool);
   const maskEdit = useApp((s) => s.maskItem) !== null;
   const effectId = useApp((s) => s.effect);
   const t = currentSet();
@@ -486,7 +511,9 @@ export function Properties() {
   if (!t || !l)
     return (
       <div className="cs-pane">
-        <PanelHeader title="Properties" />
+        <div className="cs-dockhead">
+          <span className="cs-dtab on">Properties</span>
+        </div>
         <div className="cs-empty" style={{ padding: '0 12px' }}>
           Pick a layer to change it.
         </div>
@@ -494,48 +521,27 @@ export function Properties() {
     );
   const fx = effectId ? l.effects?.find((e) => e.id === effectId) : undefined;
   const own = !maskEdit && !fx;
+  const painting = tool !== 'picker';
+  const what = maskEdit ? (painting ? `${TOOL_NAMES[tool]} (mask)` : 'Mask') : fx ? fx.name : l.kind === 'fill' ? 'Fill' : l.kind === 'group' ? 'Folder' : TOOL_NAMES[tool];
   return (
     <div className="cs-pane">
-      <PanelHeader title={maskEdit ? `${l.name}: mask` : fx ? `${l.name}: ${fx.name}` : l.name}>
+      <div className="cs-dockhead">
+        <span className="cs-dtab on">Properties - {what}</span>
         {!own && (
           <Button size="sm" onClick={() => set({ maskItem: null, effect: null })}>
             Layer
           </Button>
         )}
-      </PanelHeader>
+      </div>
       <div className="cs-scroll">
         <div className="cs-props" style={{ padding: '0 4px 14px' }}>
-          {own && (
-            <Field label="Blend">
-              <select className="cs-select" value={l.blend} onChange={(e) => change(l, `Change blend of ${l.name}`, (x) => ({ ...x, blend: e.target.value as BlendMode }))}>
-                {BLEND_MODES.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {l.kind === 'group' && m.value === 'normal' ? 'Pass through' : m.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
-          {own && (
-            <Field label="Opacity">
-              <Range value={l.opacity} min={0} max={1} label="Opacity" onChange={(v) => change(l, '', (x) => ({ ...x, opacity: v }), true)} onCommit={() => commit(`Change opacity of ${l.name}`)} />
-            </Field>
-          )}
-          {own && l.kind !== 'group' && <span className="cs-note">Channels</span>}
-          {own && l.kind !== 'group' && (
-            <Chips
-              options={CHANNELS.filter((c) => t.channels.includes(c.id)).map((c) => ({ value: c.id, label: c.label, disabled: l.kind === 'paint' && c.id === 'normal' }))}
-              value={l.channels}
-              onChange={(v) => change(l, `Change channels of ${l.name}`, (x) => ({ ...x, channels: v }))}
-            />
-          )}
           {maskEdit && l.mask && <MaskProps l={l} t={t} />}
           {fx && <EffectProps l={l} t={t} w="layer" it={fx} />}
           {fx && <Section title="Add an effect" />}
           {fx && <AddEffect l={l} w="layer" />}
-          {fx?.kind === 'paint' && <TipProps />}
+          {fx?.kind === 'paint' && painting && <TipProps />}
+          {own && l.kind === 'paint' && painting && <TipProps />}
           {own && l.kind === 'paint' && <BrushProps l={l} />}
-          {own && l.kind === 'paint' && <TipProps />}
           {own && l.kind === 'fill' && <FillProps l={l} />}
           {own && l.kind !== 'group' && (
             <>
@@ -556,12 +562,7 @@ export function Properties() {
               </div>
             </>
           )}
-          {own && l.mask && (
-            <Button size="sm" onClick={() => set({ maskItem: l.mask!.items[0]?.id ?? MASK_ROOT })}>
-              Edit the mask
-            </Button>
-          )}
-          {own && l.kind === 'group' && <span className="cs-note">Pass through blends the group's layers with what's below them; any other mode blends the group as one.</span>}
+          {own && l.kind === 'group' && <span className="cs-note">Pass through blends the folder's layers with what's below them; any other mode blends the folder as one.</span>}
         </div>
       </div>
     </div>

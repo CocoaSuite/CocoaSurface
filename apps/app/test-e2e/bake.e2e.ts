@@ -93,7 +93,8 @@ test('bake from a high-poly model, drive a mask with the maps, save and reopen',
     await pg.goto(`http://localhost:${srv.address().port}/?inspect`);
     await open(() => pg.getByText('New project from a model…').first().click(), low);
     await pg.waitForSelector('canvas.cs-gl');
-    await pg.locator('.cs-side.l select').first().selectOption('512');
+    await pg.getByRole('button', { name: 'Texture Set Settings' }).click();
+    await pg.locator('.cs-tsets select').first().selectOption('512');
     await pg.getByText('Bake mesh maps…').first().click();
     await open(() => pg.locator('.cs-box button', { hasText: 'Load' }).click(), high);
     await pg.locator('.cs-box').getByText('Use it').waitFor();
@@ -209,8 +210,9 @@ test('bevel shader, name matching and automatic cages', async () => {
     await pg.goto(`http://localhost:${srv.address().port}/?inspect`);
     await open(() => pg.getByText('New project from a model…').first().click(), low);
     await pg.waitForSelector('canvas.cs-gl');
-    await pg.locator('.cs-side.l select').first().selectOption('512');
-    await pg.locator('.cs-side.l .cs-seg button', { hasText: 'Skew' }).click();
+    await pg.getByRole('button', { name: 'Texture Set Settings' }).click();
+    await pg.locator('.cs-tsets select').first().selectOption('512');
+    await pg.locator('.cs-tsets .cs-seg button', { hasText: 'Skew' }).click();
     const box2 = await pg.locator('canvas.cs-gl').boundingBox();
     await pg.mouse.move(box2.x + box2.width / 2 - 60, box2.y + box2.height / 2);
     await pg.mouse.down();
@@ -226,7 +228,7 @@ test('bevel shader, name matching and automatic cages', async () => {
     });
     assert.ok(skew > 100, 'skew paints onto the model');
     assert.equal(await pg.evaluate(() => window.surface.get().view.mode), 'bake:skew');
-    await pg.locator('.cs-side.l').getByRole('radio', { name: 'Off', exact: true }).click();
+    await pg.locator('.cs-tsets').getByRole('radio', { name: 'Off', exact: true }).click();
     await pg.getByText('Bake mesh maps…').first().click();
     await open(() => pg.locator('.cs-box button', { hasText: 'Load' }).click(), high);
     await pg.locator('.cs-box').getByText('Match names').waitFor();

@@ -1,53 +1,76 @@
 import { useEffect, useState } from 'react';
-import { Divider, MenuBar, NumberField, Spacer, Switch, Toast, ToolButton, type MenuEntry } from '@cocoasurface/ui';
+import { Divider, MenuBar, NumberField, Segmented, Spacer, Toast, ToolButton, type MenuEntry } from '@cocoasurface/ui';
 import { CHANNELS, MESH_MAPS } from '@cocoasurface/project';
 import { autosave, exportSetMaterial, importMaterials, importModelInto, newFromModel, openProject, recover, saveProject } from '../io';
-import { currentSet, get, redo, set, undo, useApp, type Brush, type Tool } from '../store';
+import { currentSet, get, redo, set, undo, useApp, type Brush, type Tool, type ViewMode } from '../store';
+import type { CameraView } from '../engine/viewport';
 import { BakeDialog } from './BakeDialog';
 import { ExportDialog } from './ExportDialog';
-import { Layers, addLayer, removeCurrentLayer } from './Layers';
-import { Library } from './Library';
+import { Layers, addLayer, duplicate, removeCurrentLayer } from './Layers';
+import { Shelf } from './Shelf';
 import { Properties } from './Properties';
 import { Start } from './Start';
 import { TextureSets } from './TextureSets';
-import { ViewportPane } from './ViewportPane';
+import { ViewportPane, viewport } from './ViewportPane';
 
-const TOOLS: { id: Tool; icon: 'brush' | 'eraser' | 'fill' | 'smudge' | 'blur' | 'orbit'; label: string }[] = [
+const TOOLS: { id: Tool; icon: 'brush' | 'eraser' | 'fill' | 'smudge' | 'blur' | 'picker'; label: string }[] = [
   { id: 'paint', icon: 'brush', label: 'Paint' },
   { id: 'erase', icon: 'eraser', label: 'Erase' },
   { id: 'fill', icon: 'fill', label: 'Fill' },
   { id: 'smudge', icon: 'smudge', label: 'Smudge' },
   { id: 'blur', icon: 'blur', label: 'Blur' },
-  { id: 'orbit', icon: 'orbit', label: 'Orbit' },
+  { id: 'picker', icon: 'picker', label: 'Color picker' },
 ];
 
-function BrushBar() {
+const KEYS: Record<string, Tool> = { Digit1: 'paint', Digit2: 'erase', Digit4: 'fill', Digit5: 'smudge', KeyP: 'picker' };
+
+function ContextBar() {
   const b = useApp((s) => s.brush);
   const sym = useApp((s) => s.symmetry);
-  const field = (k: keyof Brush, label: string, scale: number, max: number) => (
-    <>
-      <span>{label}</span>
-      <NumberField
-        value={Math.round((b[k] as number) * scale)}
-        label=""
-        ariaLabel={label}
-        onChange={(v) => set((s) => ({ brush: { ...s.brush, [k]: Math.min(max, Math.max(scale === 1 ? 1 : 0, v)) / scale } }))}
-        onCommit={(v) => set((s) => ({ brush: { ...s.brush, [k]: Math.min(max, Math.max(scale === 1 ? 1 : 0, v)) / scale } }))}
-      />
-    </>
-  );
+  const tool = useApp((s) => s.tool);
+  const put = (v: Partial<Brush>) => set((s) => ({ brush: { ...s.brush, ...v } }));
+  const field = (k: 'size' | 'flow' | 'opacity' | 'spacing' | 'hardness' | 'angle', label: string, scale: number, max: number) => {
+    const f = (v: number) => put({ [k]: Math.min(max, Math.max(k === 'size' ? 1 : 0, v)) / scale });
+    return (
+      <>
+        <span>{label}</span>
+        <NumberField value={Math.round(b[k] * scale)} label="" ariaLabel={label} onChange={f} onCommit={f} />
+      </>
+    );
+  };
   return (
-    <div className="cs-brushbar">
-      {field('size', 'Size', 1, 1000)}
-      {field('flow', 'Flow', 100, 100)}
-      {field('opacity', 'Opacity', 100, 100)}
-      {field('hardness', 'Hardness', 100, 100)}
-      {field('spacing', 'Spacing', 100, 200)}
-      <Divider />
-      <span>Mirror X</span>
-      <Switch checked={sym} onChange={(v) => set({ symmetry: v })} label="Mirror X" />
+    <div className="cs-ctxbar cs-brushbar">
+      {tool === 'fill' ? (
+        <>
+          <span>Fill mode</span>
+          <Segmented label="Fill mode" options={[{ value: 'island', label: 'UV island' }, { value: 'mesh', label: 'Mesh' }]} value={b.fillBy} onChange={(v) => put({ fillBy: v as Brush['fillBy'] })} />
+        </>
+      ) : tool === 'picker' ? (
+        <span>Color picker</span>
+      ) : (
+        <>
+          {field('size', 'Size', 1, 1000)}
+          {field('flow', 'Flow', 100, 100)}
+          {field('opacity', 'Stroke opacity', 100, 100)}
+          {field('spacing', 'Spacing', 100, 200)}
+          {field('hardness', 'Hardness', 100, 100)}
+          {field('angle', 'Angle', 1, 360)}
+          <Divider />
+          <ToolButton icon="symmetry" label="Symmetry" active={sym} onClick={() => set({ symmetry: !sym })} />
+          <span>Lazy mouse</span>
+          <NumberField value={b.stabilize} label="" ariaLabel="Lazy mouse" onChange={(v) => put({ stabilize: Math.max(0, Math.min(100, v)) })} onCommit={(v) => put({ stabilize: Math.max(0, Math.min(100, v)) })} />
+        </>
+      )}
     </div>
   );
+}
+
+function cycle(kind: 'channel' | 'mesh'): void {
+  const t = currentSet();
+  if (!t) return;
+  const list: ViewMode[] = kind === 'channel' ? CHANNELS.filter((c) => t.channels.includes(c.id)).map((c) => c.id) : (t.bake?.done ?? []).map((m) => `mesh:${m}` as const);
+  if (!list.length) return;
+  set((s) => ({ view: { ...s.view, mode: list[(list.indexOf(s.view.mode) + 1) % list.length]! } }));
 }
 
 export function App() {
@@ -75,14 +98,16 @@ export function App() {
       else if (mod && code === 'KeyO') void openProject();
       else if (mod && code === 'KeyN') void newFromModel();
       else if (mod && e.shiftKey && code === 'KeyE') setExporting(true);
-      else if (mod) return;
-      else if (code === 'KeyB') set({ tool: 'paint' });
-      else if (code === 'KeyE') set({ tool: 'erase' });
-      else if (code === 'KeyO') set({ tool: 'orbit' });
+      else if (mod || e.altKey) return;
+      else if (KEYS[code]) set({ tool: KEYS[code] });
+      else if (code === 'KeyX') set((s) => ({ brush: { ...s.brush, maskValue: 1 - s.brush.maskValue } }));
+      else if (code === 'KeyC') cycle('channel');
+      else if (code === 'KeyB') cycle('mesh');
+      else if (code === 'KeyF') viewport()?.frame();
       else if (code === 'BracketLeft') set((s) => ({ brush: { ...s.brush, size: Math.max(1, Math.round(s.brush.size / 1.15)) } }));
       else if (code === 'BracketRight') set((s) => ({ brush: { ...s.brush, size: Math.min(1000, Math.round(s.brush.size * 1.15)) } }));
       else if (code === 'Delete' || code === 'Backspace') removeCurrentLayer();
-      else if (code === 'KeyM') set((s) => ({ view: { ...s.view, mode: s.view.mode === 'material' ? 'color' : 'material' } }));
+      else if (code === 'KeyM') set((s) => ({ view: { ...s.view, mode: 'material' } }));
       else return;
       e.preventDefault();
     };
@@ -118,15 +143,21 @@ export function App() {
         'separator',
         { label: 'New paint layer', disabled: !has, onSelect: () => addLayer('paint') },
         { label: 'New fill layer', disabled: !has, onSelect: () => addLayer('fill') },
-        { label: 'New group', disabled: !has, onSelect: () => addLayer('group') },
+        { label: 'New folder', disabled: !has, onSelect: () => addLayer('group') },
+        'separator',
+        { label: 'Duplicate layer', disabled: !has, onSelect: duplicate },
+        { label: 'Delete layer', disabled: !has, onSelect: removeCurrentLayer },
       ],
     },
     {
-      label: 'View',
+      label: 'Viewport',
       items: [
         { label: 'Material', onSelect: () => set((s) => ({ view: { ...s.view, mode: 'material' } })) },
         ...CHANNELS.map((c) => ({ label: c.label, onSelect: () => set((s) => ({ view: { ...s.view, mode: c.id } })) })),
         ...(currentSet()?.bake?.done ?? []).map((m) => ({ label: `Mesh map: ${MESH_MAPS.find((x) => x.id === m)!.label}`, onSelect: () => set((s) => ({ view: { ...s.view, mode: `mesh:${m}` as const } })) })),
+        'separator',
+        ...(['front', 'back', 'left', 'right', 'top', 'bottom'] as CameraView[]).map((v) => ({ label: `Camera: ${v[0]!.toUpperCase()}${v.slice(1)}`, onSelect: () => viewport()?.look(v) })),
+        { label: 'Fit to screen', onSelect: () => viewport()?.frame() },
         'separator',
         { label: get().view.wire ? 'Hide wireframe' : 'Show wireframe', onSelect: () => set((s) => ({ view: { ...s.view, wire: !s.view.wire } })) },
         { label: get().view.grid ? 'Hide grid' : 'Show grid', onSelect: () => set((s) => ({ view: { ...s.view, grid: !s.view.grid } })) },
@@ -141,8 +172,8 @@ export function App() {
         <img className="cs-mark" src="./logo-mark.svg" alt="CocoaSurface" />
         <MenuBar menus={menus} />
         <Spacer />
-        {has && <BrushBar />}
       </div>
+      {has && <ContextBar />}
       {has ? (
         <div className="cs-main">
           <div className="cs-rail">
@@ -150,13 +181,15 @@ export function App() {
               <ToolButton key={t.id} icon={t.icon} label={t.label} active={tool === t.id} onClick={() => set({ tool: t.id })} />
             ))}
           </div>
-          <div className="cs-side l">
-            <TextureSets onBake={() => setBaking(true)} />
-            <Library />
+          <div className="cs-center">
+            <ViewportPane />
+            <Shelf />
           </div>
-          <ViewportPane />
-          <div className="cs-side r">
+          <div className="cs-side m">
+            <TextureSets onBake={() => setBaking(true)} />
             <Layers />
+          </div>
+          <div className="cs-side r">
             <Properties />
           </div>
         </div>
