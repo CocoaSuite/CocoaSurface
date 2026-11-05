@@ -1,4 +1,5 @@
-.cs-app { display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: 100%; }
+.cs-app { display: flex; flex-direction: column; height: 100%; }
+.cs-app > .cs-main, .cs-app > .cs-start { flex: 1; min-height: 0; }
 .cs-top .cs-mark { width: 20px; height: 20px; display: block; }
 .cs-top { -webkit-app-region: drag; app-region: drag; height: 38px; min-height: 38px; box-sizing: border-box; padding-left: max(10px, env(titlebar-area-x, 0px)); padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 10px); }
 .cs-top button, .cs-top input, .cs-top select, .cs-top .cs-dd, .cs-top .cs-mn { -webkit-app-region: no-drag; app-region: no-drag; }
@@ -118,7 +119,7 @@
 .cs-note { color: var(--mute); font-size: 12px; line-height: 1.45; }
 .cs-note.warn { color: var(--cs-warn); }
 
-.cs-start { display: grid; place-items: center; height: 100%; }
+.cs-start { display: grid; place-items: center; }
 .cs-start > div { display: flex; flex-direction: column; gap: 14px; width: 340px; }
 .cs-start img { width: 181px; height: 56px; }
 .cs-start .cs-row { display: flex; gap: 8px; }
