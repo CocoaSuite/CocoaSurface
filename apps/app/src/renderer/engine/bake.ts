@@ -139,6 +139,63 @@ export function averagedNormals(g: THREE.BufferGeometry): Float32Array {
   return out;
 }
 
+/**
+ * A copy of `g` with one vertex per face corner, carrying its face's corners (`triA`, `triB`, `triC`) and which of its
+ * edges (`splitE`, the edge opposite each corner) and corners (`splitV`) lie on split edges: edges whose faces have
+ * different normals there.
+ */
+export function withEdgeDistances(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  const p = g.getAttribute('position'), n = g.getAttribute('normal');
+  const idx = g.index;
+  const count = idx ? idx.count : p.count;
+  const box = g.boundingBox ?? (g.computeBoundingBox(), g.boundingBox!);
+  const q = 1e5 / (box.getSize(new THREE.Vector3()).length() || 1);
+  const at = (i: number) => (idx ? idx.getX(i) : i);
+  const pk = (v: number) => `${Math.round(p.getX(v) * q)},${Math.round(p.getY(v) * q)},${Math.round(p.getZ(v) * q)}`;
+  const nv = (v: number) => new THREE.Vector3(n.getX(v), n.getY(v), n.getZ(v));
+  const edges = new Map<string, { na: THREE.Vector3; nb: THREE.Vector3 }[]>();
+  const edgeOf = (t: number, k: number) => {
+    const u = at(t + ((k + 1) % 3)), w = at(t + ((k + 2) % 3));
+    const ku = pk(u), kw = pk(w);
+    return ku < kw ? { key: `${ku}|${kw}`, u, w, ku, kw } : { key: `${kw}|${ku}`, u: w, w: u, ku: kw, kw: ku };
+  };
+  for (let t = 0; t < count; t += 3)
+    for (let k = 0; k < 3; k++) {
+      const e = edgeOf(t, k);
+      let l = edges.get(e.key);
+      if (!l) edges.set(e.key, (l = []));
+      l.push({ na: nv(e.u), nb: nv(e.w) });
+    }
+  const splitPoints = new Set<string>();
+  const splitEdges = new Set<string>();
+  for (const [key, l] of edges)
+    if (l.length > 1 && l.some((x) => x.na.dot(l[0]!.na) < 0.9995 || x.nb.dot(l[0]!.nb) < 0.9995)) {
+      splitEdges.add(key);
+      for (const k of key.split('|')) splitPoints.add(k);
+    }
+  const out = idx ? g.toNonIndexed() : g.clone();
+  const tri = [new Float32Array(count * 3), new Float32Array(count * 3), new Float32Array(count * 3)];
+  const sE = new Float32Array(count * 3), sV = new Float32Array(count * 3);
+  for (let t = 0; t < count; t += 3) {
+    const e = [0, 1, 2].map((k) => (splitEdges.has(edgeOf(t, k).key) ? 1 : 0));
+    const v = [0, 1, 2].map((k) => (splitPoints.has(pk(at(t + k))) ? 1 : 0));
+    for (let c = 0; c < 3; c++) {
+      for (let k = 0; k < 3; k++) {
+        const vi = at(t + k);
+        tri[k]!.set([p.getX(vi), p.getY(vi), p.getZ(vi)], (t + c) * 3);
+      }
+      sE.set(e, (t + c) * 3);
+      sV.set(v, (t + c) * 3);
+    }
+  }
+  out.setAttribute('triA', new THREE.BufferAttribute(tri[0]!, 3));
+  out.setAttribute('triB', new THREE.BufferAttribute(tri[1]!, 3));
+  out.setAttribute('triC', new THREE.BufferAttribute(tri[2]!, 3));
+  out.setAttribute('splitE', new THREE.BufferAttribute(sE, 3));
+  out.setAttribute('splitV', new THREE.BufferAttribute(sV, 3));
+  return out;
+}
+
 const averaged = new WeakMap<THREE.BufferGeometry, Float32Array>();
 export function cageDirections(g: THREE.BufferGeometry, average: boolean): Float32Array {
   if (!average) return g.getAttribute('normal').array as Float32Array;
@@ -195,6 +252,17 @@ export function autoCage(low: LoadedModel, part: number, src: BakeSource, diag: 
 const VS = /* glsl */ `
 in vec2 cage;
 in vec3 cageDir;
+in vec3 triA;
+in vec3 triB;
+in vec3 triC;
+in vec3 splitE;
+in vec3 splitV;
+out vec3 vPos;
+flat out vec3 vA;
+flat out vec3 vB;
+flat out vec3 vC;
+flat out vec3 vSE;
+flat out vec3 vSV;
 out vec3 vWorld;
 out vec3 vDir;
 out vec3 vN;
@@ -206,6 +274,8 @@ void main() {
   vN = normalize(transpose(inverse(mat3(modelMatrix))) * normal);
   vUv = uv;
   vCage = cage;
+  vPos = position;
+  vA = triA; vB = triB; vC = triC; vSE = splitE; vSV = splitV;
   vDir = normalize(transpose(inverse(mat3(modelMatrix))) * cageDir);
   gl_Position = vec4(uv * 2. - 1., 0., 1.);
 }`;
@@ -222,6 +292,28 @@ in vec3 vWorld;
 in vec3 vN;
 in vec2 vUv;
 in vec2 vCage;
+in vec3 vPos;
+flat in vec3 vA;
+flat in vec3 vB;
+flat in vec3 vC;
+flat in vec3 vSE;
+flat in vec3 vSV;
+float seg(vec3 p, vec3 a, vec3 b) {
+  vec3 ab = b - a;
+  float t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-20), 0., 1.);
+  return length(p - a - ab * t);
+}
+/** How far this point is from the nearest split edge or corner of its face. */
+float splitDistance() {
+  float d = 1e9;
+  if (vSE.x > .5) d = min(d, seg(vPos, vB, vC));
+  if (vSE.y > .5) d = min(d, seg(vPos, vC, vA));
+  if (vSE.z > .5) d = min(d, seg(vPos, vA, vB));
+  if (vSV.x > .5) d = min(d, length(vPos - vA));
+  if (vSV.y > .5) d = min(d, length(vPos - vB));
+  if (vSV.z > .5) d = min(d, length(vPos - vC));
+  return d;
+}
 in vec3 vDir;
 out vec4 o;
 uniform BVH bvh;
@@ -370,7 +462,10 @@ void main() {
   float off = texture(u_offset, vUv).r * 2.;
   float front = vCage.x * off, rear = vCage.y * off;
   vec3 hn; vec4 hid; float d;
-  vec3 dir = normalize(mix(N, Nf, skew));
+  // Averaged normals at split edges, so both sides meet; the mesh's own normals away from them.
+  float edge = splitDistance();
+  vec3 own = normalize(mix(normalize(vDir), N, smoothstep(0., max(.4 * (front + rear), 1e-6), edge)));
+  vec3 dir = normalize(mix(own, Nf, skew));
   vec3 ro = vWorld + dir * front;
   bool found = u_meshFirst == 1 && dot(N, normalize(vDir)) < .9999 && traceOwn(ro, -dir, hn, hid, d) && d <= front + rear;
   if (!found) {
@@ -525,6 +620,7 @@ export async function bakeSet(
   const parts = g.parts;
 
   // Cages, per mesh, as a vertex attribute.
+  const restores: (() => void)[] = [];
   for (const i of parts) {
     const geo = low.parts[i]!.mesh.geometry;
     const c = high ? (st.cages[partName(low, i)] ?? { front: st.front, rear: st.rear }) : { front: 0.0005, rear: 0.0005 };
@@ -535,6 +631,8 @@ export async function bakeSet(
     }
     geo.setAttribute('cage', new THREE.BufferAttribute(a, 2));
     geo.setAttribute('cageDir', new THREE.BufferAttribute(cageDirections(geo, high && st.averageNormals !== false), 3));
+    const bg = withEdgeDistances(geo);
+    restores.push(g.useGeometry(i, bg), () => bg.dispose());
   }
 
   const painted = g.pixels.get(BAKE_LAYER);
@@ -686,6 +784,7 @@ export async function bakeSet(
     progress({ done: total, total });
     return true;
   } finally {
+    restores.forEach((f) => f());
     r.autoClear = auto;
     r.setRenderTarget(prev);
     for (const t of new Set([...raw.values(), ...pool])) t.dispose();

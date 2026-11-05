@@ -223,6 +223,15 @@ export class SetGPU {
     return this.proxies.map((x) => x.part);
   }
 
+  /** Draws a part with another geometry until `restore` is called. */
+  useGeometry(part: number, geo: THREE.BufferGeometry): () => void {
+    const x = this.proxies.find((y) => y.part === part);
+    if (!x) return () => {};
+    const old = x.mesh.geometry;
+    x.mesh.geometry = geo;
+    return () => void (x.mesh.geometry = old);
+  }
+
   drawWith(m: THREE.Material, target: THREE.WebGLRenderTarget, part?: number): void {
     this.draw(m, target, part);
   }

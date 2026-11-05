@@ -272,11 +272,13 @@ function cylinder(file, R, n, h, low, bevel = 0) {
   const vert = (p, uv, nn) => (v.push(`v ${p[0]} ${p[1]} ${p[2]}`), t.push(`vt ${uv[0]} ${uv[1]}`), vn.push(`vn ${nn[0]} ${nn[1]} ${nn[2]}`), ++k);
   const quad = (a, b, c, d) => f.push(`f ${a}/${a}/${a} ${b}/${b}/${b} ${c}/${c}/${c}`, `f ${a}/${a}/${a} ${c}/${c}/${c} ${d}/${d}/${d}`);
   // Rings up the side: radius, height, normal tilt. A bevel adds a ring that leans toward the cap.
-  const rings = bevel ? [[R - bevel, -h, -1], [R, -h + bevel, 0], [R, h - bevel, 0], [R - bevel, h, 1]] : [[R, -h, 0], [R, h, 0]];
-  const rows = rings.map(([r, y, tilt], j) =>
+  // A rounded bevel: quarter circles at both rims.
+  const arc = (s) => Array.from({ length: 6 }, (_, k) => (k / 5) * (Math.PI / 2)).map((t) => [R - bevel + bevel * Math.cos(t), s * (h - bevel + bevel * Math.sin(t)), Math.cos(t), s * Math.sin(t)]);
+  const rings = bevel ? [...arc(-1).reverse(), ...arc(1)] : [[R, -h, 1, 0], [R, h, 1, 0]];
+  const rows = rings.map(([r, y, nr, ny], j) =>
     Array.from({ length: n + 1 }, (_, i) => {
-      const a = (2 * Math.PI * i) / n, l = Math.hypot(1, tilt);
-      return vert([r * Math.cos(a), y, r * Math.sin(a)], [i / n, 0.35 + (0.6 * j) / (rings.length - 1)], [Math.cos(a) / l, tilt / l, Math.sin(a) / l]);
+      const a = (2 * Math.PI * i) / n;
+      return vert([r * Math.cos(a), y, r * Math.sin(a)], [i / n, 0.35 + (0.6 * j) / (rings.length - 1)], [nr * Math.cos(a), ny, nr * Math.sin(a)]);
     }),
   );
   for (let j = 0; j + 1 < rows.length; j++) for (let i = 0; i < n; i++) quad(rows[j][i], rows[j][i + 1], rows[j + 1][i + 1], rows[j + 1][i]);
@@ -311,25 +313,20 @@ test('a round high-poly model baked onto a few-sided low-poly one has clean rims
       await trigger();
       await (await fc).setFiles(files);
     };
-    // How much the normal map's green wobbles along a row just under the top rim of the side.
+    // How far down from the top rim the bevel reaches in each column of the side: scallops make it vary, in texels.
     const wobble = () =>
       pg.evaluate(() => {
         const g = [...window.surface.engine.sets.values()][0];
         const t = g.baked.get('normal');
         const px = g.p.read(t), w = t.width;
-        let worst = 0;
-        for (const v of [0.94, 0.93, 0.92, 0.36, 0.37]) {
-          const y = Math.floor(v * w);
-          let s = 0, s2 = 0, n = 0;
-          for (let x = Math.floor(w * 0.02); x < w * 0.98; x++) {
-            const gr = px[(y * w + x) * 4 + 1];
-            s += gr;
-            s2 += gr * gr;
-            n++;
-          }
-          worst = Math.max(worst, Math.sqrt(Math.max(0, s2 / n - (s / n) ** 2)));
+        const top = Math.floor(0.95 * w) - 1, low = Math.floor(0.75 * w);
+        const reach = [];
+        for (let x = Math.floor(w * 0.01); x < w * 0.99; x += 2) {
+          let y = top;
+          while (y > low && Math.abs(px[(y * w + x) * 4 + 1] - 128) > 6) y--;
+          reach.push(top - y);
         }
-        return worst;
+        return Math.max(...reach) - Math.min(...reach);
       });
     const bake = async (meshFirst) => {
       await pg.getByText(/Bake (mesh maps|again)…/).first().click();
@@ -337,7 +334,7 @@ test('a round high-poly model baked onto a few-sided low-poly one has clean rims
         await open(() => pg.locator('.cs-box button', { hasText: 'Load' }).click(), high);
         await pg.locator('.cs-cages').waitFor();
       }
-      for (const m of ['World normal', 'Position', 'Occlusion', 'Curvature', 'Thickness', 'ID']) {
+      for (const m of ['Position', 'Occlusion', 'Curvature', 'Thickness', 'ID']) {
         const c = pg.locator('.cs-box .cs-chip', { hasText: m }).first();
         if ((await c.getAttribute('aria-pressed')) === 'true') await c.click();
       }
@@ -350,6 +347,21 @@ test('a round high-poly model baked onto a few-sided low-poly one has clean rims
       await pg.waitForTimeout(300);
       return wobble();
     };
+    // Upward lean of the surface found just under the rim on the side and just inside it on the cap: they should meet.
+    const rimGap = () =>
+      pg.evaluate(() => {
+        const g = [...window.surface.engine.sets.values()][0];
+        const t = g.baked.get('worldNormal');
+        const px = g.p.read(t), w = t.width;
+        const up = (u, v) => px[(Math.floor(v * w) * w + Math.floor(u * w)) * 4 + 1] / 127.5 - 1;
+        let side = 0, cap = 0;
+        for (let i = 0; i < 48; i++) {
+          const a = ((i + 0.5) / 48) * 2 * Math.PI;
+          side += up((i + 0.5) / 48, 0.95 - 1.5 / w);
+          cap += up(0.22 + (0.14 - 1.5 / w) * Math.cos(a), 0.16 + (0.14 - 1.5 / w) * Math.sin(a));
+        }
+        return Math.abs(side - cap) / 48;
+      });
     await pg.goto(`http://localhost:${srv.address().port}/?inspect`);
     await open(() => pg.getByText('New project from a model…').first().click(), low);
     await pg.waitForSelector('canvas.cs-gl');
@@ -357,7 +369,9 @@ test('a round high-poly model baked onto a few-sided low-poly one has clean rims
     await pg.locator('.cs-tsets select').first().selectOption('512');
     const averaged = await bake(false);
     const meshFirst = await bake(true);
-    assert.ok(meshFirst < 4 && meshFirst < averaged * 0.5, `mesh normals first keeps the rims straight (${meshFirst.toFixed(1)} against ${averaged.toFixed(1)})`);
+    const gap = await rimGap();
+    assert.ok(gap < 0.15, `side and cap meet at the rim (${gap.toFixed(2)})`);
+    assert.ok(meshFirst < averaged * 0.4, `mesh normals first keeps the rims straight (${meshFirst} against ${averaged} texels)`);
   } finally {
     await browser.close();
     srv.close();
