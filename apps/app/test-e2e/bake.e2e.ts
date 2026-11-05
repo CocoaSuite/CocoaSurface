@@ -265,3 +265,101 @@ test('bevel shader, name matching and automatic cages', async () => {
     srv.close();
   }
 }, 400_000);
+
+function cylinder(file, R, n, h, low, bevel = 0) {
+  const v = [], t = [], vn = [], f = [];
+  let k = 0;
+  const vert = (p, uv, nn) => (v.push(`v ${p[0]} ${p[1]} ${p[2]}`), t.push(`vt ${uv[0]} ${uv[1]}`), vn.push(`vn ${nn[0]} ${nn[1]} ${nn[2]}`), ++k);
+  const quad = (a, b, c, d) => f.push(`f ${a}/${a}/${a} ${b}/${b}/${b} ${c}/${c}/${c}`, `f ${a}/${a}/${a} ${c}/${c}/${c} ${d}/${d}/${d}`);
+  // Rings up the side: radius, height, normal tilt. A bevel adds a ring that leans toward the cap.
+  const rings = bevel ? [[R - bevel, -h, -1], [R, -h + bevel, 0], [R, h - bevel, 0], [R - bevel, h, 1]] : [[R, -h, 0], [R, h, 0]];
+  const rows = rings.map(([r, y, tilt], j) =>
+    Array.from({ length: n + 1 }, (_, i) => {
+      const a = (2 * Math.PI * i) / n, l = Math.hypot(1, tilt);
+      return vert([r * Math.cos(a), y, r * Math.sin(a)], [i / n, 0.35 + (0.6 * j) / (rings.length - 1)], [Math.cos(a) / l, tilt / l, Math.sin(a) / l]);
+    }),
+  );
+  for (let j = 0; j + 1 < rows.length; j++) for (let i = 0; i < n; i++) quad(rows[j][i], rows[j][i + 1], rows[j + 1][i + 1], rows[j + 1][i]);
+  for (const [r, y, cu, s] of [[R - bevel, h, 0.22, 1], [R - bevel, -h, 0.77, -1]]) {
+    const c = vert([0, y, 0], [cu, 0.16], [0, s, 0]);
+    const rim = Array.from({ length: n + 1 }, (_, i) => (2 * Math.PI * i) / n).map((a) => vert([r * Math.cos(a), y, r * Math.sin(a)], [cu + 0.14 * Math.cos(a), 0.16 + 0.14 * Math.sin(a)], [0, s, 0]));
+    for (let i = 0; i < n; i++) f.push(s > 0 ? `f ${c}/${c}/${c} ${rim[i + 1]}/${rim[i + 1]}/${rim[i + 1]} ${rim[i]}/${rim[i]}/${rim[i]}` : `f ${c}/${c}/${c} ${rim[i]}/${rim[i]}/${rim[i]} ${rim[i + 1]}/${rim[i + 1]}/${rim[i + 1]}`);
+  }
+  writeFileSync(file, [`o Can_${low ? 'low' : 'high'}`, 'usemtl Can', ...v, ...t, ...vn, ...f].join('\n'));
+}
+
+test('a round high-poly model baked onto a few-sided low-poly one has clean rims', async () => {
+  const low = path.join(tmp, 'can_low.obj'), high = path.join(tmp, 'can_high.obj');
+  cylinder(low, 1.07, 6, 1, true);
+  cylinder(high, 1, 64, 1, false, 0.12);
+  const srv = createServer(async (q, r) => {
+    const u = decodeURIComponent(q.url.split('?')[0]);
+    const p = path.join(dist, u === '/' ? 'index.html' : u);
+    try {
+      r.setHeader('content-type', types[path.extname(p)] ?? 'application/octet-stream');
+      r.end(await readFile(p));
+    } catch {
+      r.statusCode = 404;
+      r.end();
+    }
+  }).listen(0);
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  try {
+    const pg = await browser.newPage({ viewport: { width: 1440, height: 860 } });
+    const open = async (trigger, files) => {
+      const fc = pg.waitForEvent('filechooser');
+      await trigger();
+      await (await fc).setFiles(files);
+    };
+    // How much the normal map's green wobbles along a row just under the top rim of the side.
+    const wobble = () =>
+      pg.evaluate(() => {
+        const g = [...window.surface.engine.sets.values()][0];
+        const t = g.baked.get('normal');
+        const px = g.p.read(t), w = t.width;
+        let worst = 0;
+        for (const v of [0.94, 0.93, 0.92, 0.36, 0.37]) {
+          const y = Math.floor(v * w);
+          let s = 0, s2 = 0, n = 0;
+          for (let x = Math.floor(w * 0.02); x < w * 0.98; x++) {
+            const gr = px[(y * w + x) * 4 + 1];
+            s += gr;
+            s2 += gr * gr;
+            n++;
+          }
+          worst = Math.max(worst, Math.sqrt(Math.max(0, s2 / n - (s / n) ** 2)));
+        }
+        return worst;
+      });
+    const bake = async (meshFirst) => {
+      await pg.getByText(/Bake (mesh maps|again)…/).first().click();
+      if (!(await pg.locator('.cs-box').getByText('Use it').count()) && !(await pg.locator('.cs-cages').count())) {
+        await open(() => pg.locator('.cs-box button', { hasText: 'Load' }).click(), high);
+        await pg.locator('.cs-cages').waitFor();
+      }
+      for (const m of ['World normal', 'Position', 'Occlusion', 'Curvature', 'Thickness', 'ID']) {
+        const c = pg.locator('.cs-box .cs-chip', { hasText: m }).first();
+        if ((await c.getAttribute('aria-pressed')) === 'true') await c.click();
+      }
+      await pg.locator('.cs-box select').first().selectOption('512');
+      const sw = pg.getByLabel("Cast along the mesh's own normals first");
+      if (meshFirst) await sw.check();
+      else await sw.uncheck();
+      await pg.getByRole('button', { name: 'Bake', exact: true }).click();
+      await pg.waitForFunction(() => !window.surface.get().job && window.surface.get().project.textureSets[0].bake, null, { timeout: 240_000 });
+      await pg.waitForTimeout(300);
+      return wobble();
+    };
+    await pg.goto(`http://localhost:${srv.address().port}/?inspect`);
+    await open(() => pg.getByText('New project from a model…').first().click(), low);
+    await pg.waitForSelector('canvas.cs-gl');
+    await pg.getByRole('button', { name: 'Texture Set Settings' }).click();
+    await pg.locator('.cs-tsets select').first().selectOption('512');
+    const averaged = await bake(false);
+    const meshFirst = await bake(true);
+    assert.ok(meshFirst < 4 && meshFirst < averaged * 0.5, `mesh normals first keeps the rims straight (${meshFirst.toFixed(1)} against ${averaged.toFixed(1)})`);
+  } finally {
+    await browser.close();
+    srv.close();
+  }
+}, 600_000);

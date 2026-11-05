@@ -103,6 +103,10 @@ export function averagedNormals(g: THREE.BufferGeometry): Float32Array {
     fn.crossVectors(e1.subVectors(b, a), e2.subVectors(c, a));
     if (fn.lengthSq() === 0) continue;
     fn.normalize();
+    // Wound the wrong way for its own normals: turn it round.
+    let along = 0;
+    for (const vi of v) along += fn.x * n.getX(vi) + fn.y * n.getY(vi) + fn.z * n.getZ(vi);
+    if (along < 0) fn.negate();
     const pts = [a.clone(), b.clone(), c.clone()];
     for (let k = 0; k < 3; k++) {
       const o = pts[k]!, u = pts[(k + 1) % 3]!.clone().sub(o), w = pts[(k + 2) % 3]!.clone().sub(o);
@@ -149,19 +153,35 @@ export function autoCage(low: LoadedModel, part: number, src: BakeSource, diag: 
   const p = g.getAttribute('position');
   const n = new THREE.BufferAttribute(cageDirections(g, average), 3);
   const far = 0.15 * diag;
-  const step = Math.max(1, Math.floor(p.count / 4000));
+  const idx = g.index;
+  const tris = (idx ? idx.count : p.count) / 3;
+  const step = Math.max(1, Math.floor(tris / 1500));
   const ray = new THREE.Ray();
   const fronts: number[] = [], rears: number[] = [];
   const o = new THREE.Vector3(), d = new THREE.Vector3();
-  for (let i = 0; i < p.count; i += step) {
-    d.set(n.getX(i), n.getY(i), n.getZ(i)).normalize();
-    o.set(p.getX(i), p.getY(i), p.getZ(i)).addScaledVector(d, far);
-    ray.set(o, d.clone().negate());
-    const hit = src.cpu.raycastFirst(ray, THREE.DoubleSide, 0, far * 2);
-    if (!hit) continue;
-    const x = hit.distance - far;
-    if (x < 0) fronts.push(-x);
-    else rears.push(x);
+  const P = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()], N = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+  // Corners, edge middles and the centre of each face: low-poly faces can sink into the high-poly surface between corners.
+  const W = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.5, 0.5, 0], [0, 0.5, 0.5], [0.5, 0, 0.5], [1 / 3, 1 / 3, 1 / 3]];
+  for (let t = 0; t < tris; t += step) {
+    for (let k = 0; k < 3; k++) {
+      const vi = idx ? idx.getX(t * 3 + k) : t * 3 + k;
+      P[k]!.fromBufferAttribute(p, vi);
+      N[k]!.fromBufferAttribute(n, vi);
+    }
+    for (const w of W) {
+      o.set(0, 0, 0);
+      d.set(0, 0, 0);
+      for (let k = 0; k < 3; k++) (o.addScaledVector(P[k]!, w[k]!), d.addScaledVector(N[k]!, w[k]!));
+      if (d.lengthSq() < 1e-12) continue;
+      d.normalize();
+      o.addScaledVector(d, far);
+      ray.set(o, d.clone().negate());
+      const hit = src.cpu.raycastFirst(ray, THREE.DoubleSide, 0, far * 2);
+      if (!hit) continue;
+      const x = hit.distance - far;
+      if (x < 0) fronts.push(-x);
+      else rears.push(x);
+    }
   }
   const pick = (v: number[]) => {
     if (!v.length) return 0;
@@ -214,6 +234,7 @@ uniform sampler2D u_allBounds;
 uniform usampler2D u_allContents;
 uniform sampler2D u_normalsAll;
 uniform sampler2D u_skew;
+uniform int u_meshFirst;
 uniform sampler2D u_offset;
 uniform sampler2D u_sp;
 uniform sampler2D u_sn;
@@ -347,11 +368,16 @@ void main() {
   // Find the surface: from the cage (painted offset scales it) along the normal (painted skew turns it to the face normal).
   float skew = texture(u_skew, vUv).r;
   float off = texture(u_offset, vUv).r * 2.;
-  vec3 dir = normalize(mix(normalize(vDir), Nf, skew));
   float front = vCage.x * off, rear = vCage.y * off;
-  vec3 ro = vWorld + dir * front;
   vec3 hn; vec4 hid; float d;
-  bool found = traceOwn(ro, -dir, hn, hid, d) && d <= front + rear;
+  vec3 dir = normalize(mix(N, Nf, skew));
+  vec3 ro = vWorld + dir * front;
+  bool found = u_meshFirst == 1 && dot(N, normalize(vDir)) < .9999 && traceOwn(ro, -dir, hn, hid, d) && d <= front + rear;
+  if (!found) {
+    dir = normalize(mix(normalize(vDir), Nf, skew));
+    ro = vWorld + dir * front;
+    found = traceOwn(ro, -dir, hn, hid, d) && d <= front + rear;
+  }
   vec3 sp = (found && u_high == 1) ? ro - dir * d : vWorld;
   vec3 sn = (found && u_high == 1) ? hn : N;
 
@@ -524,6 +550,7 @@ export async function bakeSet(
       u_allContents: { value: all.bvhContents },
       u_normalsAll: { value: src.all.normals },
       u_skew: { value: painted?.get('skew')?.texture ?? zero },
+      u_meshFirst: { value: high && st.averageNormals !== false && st.meshFirst !== false ? 1 : 0 },
       u_offset: { value: painted?.get('offset')?.texture ?? half },
       u_sp: { value: null },
       u_sn: { value: null },

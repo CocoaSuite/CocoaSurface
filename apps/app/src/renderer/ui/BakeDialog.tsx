@@ -116,6 +116,12 @@ export function BakeDialog({ onClose }: { onClose: () => void }) {
                   <Switch checked={st.averageNormals !== false} onChange={(v) => put('averageNormals', v)} label="Cast along averaged normals" />
                   <span>Average normals</span>
                 </label>
+                {st.averageNormals !== false && (
+                  <label>
+                    <Switch checked={st.meshFirst !== false} onChange={(v) => put('meshFirst', v)} label="Cast along the mesh's own normals first" />
+                    <span>Mesh normals first</span>
+                  </label>
+                )}
                 <label>
                   <Switch checked={st.matchByName} onChange={(v) => put('matchByName', v)} label="Pair low and high meshes by name" />
                   <span>Match names</span>
