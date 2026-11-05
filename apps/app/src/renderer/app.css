@@ -1,5 +1,7 @@
 .cs-app { display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: 100%; }
 .cs-top .cs-mark { width: 20px; height: 20px; display: block; }
+.cs-top { -webkit-app-region: drag; app-region: drag; height: 38px; min-height: 38px; box-sizing: border-box; padding-left: max(10px, env(titlebar-area-x, 0px)); padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 10px); }
+.cs-top button, .cs-top input, .cs-top select, .cs-top .cs-dd, .cs-top .cs-mn { -webkit-app-region: no-drag; app-region: no-drag; }
 .cs-ctxbar { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px 0 54px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .cs-ctxbar .cs-nf { width: 64px; }
 .cs-ctxbar > span { color: var(--mute); font-size: 12px; margin-left: 6px; }
