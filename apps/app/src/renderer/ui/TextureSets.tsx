@@ -1,48 +1,39 @@
-import { useState } from 'react';
 import { Field, Section } from '@cocoasurface/ui';
 import { CHANNELS, MESH_MAPS, TEXTURE_SIZES, type TextureSize } from '@cocoasurface/project';
 import { Button, Segmented, Switch } from '@cocoasurface/ui';
 import { commit, currentSet, editSet, ENVIRONMENTS, set, useApp, type Environment } from '../store';
 import { Chips, Range } from './controls';
+import { focusPanel } from './Dock';
 
-export function TextureSets({ onBake }: { onBake: () => void }) {
+export function TextureSetList() {
   const project = useApp((s) => s.project)!;
   const setId = useApp((s) => s.setId);
+  return (
+      <div className="cs-scroll">
+      {project.textureSets.map((x) => (
+        <div key={x.id} className={`cs-lr${x.id === setId ? ' on' : ''}`} onClick={() => set({ setId: x.id, layerId: x.layers[0]?.id ?? null, maskItem: null })}>
+          <span className="cs-ln" style={{ paddingLeft: 8 }}>{x.name}</span>
+          <span className="cs-meta">{x.size}</span>
+          <button type="button" className="cs-btn sm ghost" onClick={(e) => (e.stopPropagation(), set({ setId: x.id }), focusPanel('settings'))}>
+            Settings
+          </button>
+        </div>
+      ))}
+      {!project.textureSets.length && <div className="cs-empty">The model has no material slots.</div>}
+    </div>
+  );
+}
+
+export function TextureSetSettings({ onBake }: { onBake: () => void }) {
+  useApp((s) => s.project);
   const view = useApp((s) => s.view);
   const bakePaint = useApp((s) => s.bakePaint);
   const bakeValue = useApp((s) => s.bakeValue);
   const t = currentSet();
-  const [tab, setTab] = useState<'list' | 'settings' | 'display'>('list');
-  const tabs = [
-    ['list', 'Texture Set List'],
-    ['settings', 'Texture Set Settings'],
-    ['display', 'Display Settings'],
-  ] as const;
+  if (!t) return <div className="cs-empty">No texture set.</div>;
   return (
-    <div className="cs-pane cs-tsets">
-      <div className="cs-dockhead">
-        {tabs.map(([v, label]) => (
-          <button key={v} type="button" className={`cs-dtab${tab === v ? ' on' : ''}`} onClick={() => setTab(v)}>
-            {label}
-          </button>
-        ))}
-      </div>
-      {tab === 'list' && (
-      <div className="cs-scroll">
-        {project.textureSets.map((x) => (
-          <div key={x.id} className={`cs-lr${x.id === setId ? ' on' : ''}`} onClick={() => set({ setId: x.id, layerId: x.layers[0]?.id ?? null, maskItem: null })}>
-            <span className="cs-ln" style={{ paddingLeft: 8 }}>{x.name}</span>
-            <span className="cs-meta">{x.size}</span>
-            <button type="button" className="cs-btn sm ghost" onClick={(e) => (e.stopPropagation(), set({ setId: x.id }), setTab('settings'))}>
-              Settings
-            </button>
-          </div>
-        ))}
-        {!project.textureSets.length && <div className="cs-empty">The model has no material slots.</div>}
-      </div>
-      )}
-      {t && tab === 'settings' && (
-        <div className="cs-scroll"><div className="cs-props">
+    <div className="cs-tsets cs-scroll">
+      <div className="cs-props">
           <Section title={t.name} />
           <Field label="Size">
             <select className="cs-select" value={t.size} onChange={(e) => editSet('Change texture size', (s) => ({ ...s, size: Number(e.target.value) as TextureSize }))}>
@@ -102,10 +93,15 @@ export function TextureSets({ onBake }: { onBake: () => void }) {
           <Button size="sm" onClick={onBake} disabled={!!useApp.getState().job}>
             {t.bake?.done.length ? 'Bake again…' : 'Bake mesh maps…'}
           </Button>
-        </div></div>
-      )}
-      {tab === 'display' && (
-        <div className="cs-scroll"><div className="cs-props">
+      </div>
+    </div>
+  );
+}
+
+export function DisplaySettings() {
+  const view = useApp((s) => s.view);
+  return (
+    <div className="cs-scroll"><div className="cs-props">
           <Section title="Environment" />
           <Field label="Light">
             <select className="cs-select" value={view.env} onChange={(e) => set((s) => ({ view: { ...s.view, env: e.target.value as Environment } }))}>
@@ -135,8 +131,6 @@ export function TextureSets({ onBake }: { onBake: () => void }) {
           <Field label="Grid">
             <Switch checked={view.grid} label="Grid" onChange={(v) => set((s) => ({ view: { ...s.view, grid: v } }))} />
           </Field>
-        </div></div>
-      )}
-    </div>
+    </div></div>
   );
 }

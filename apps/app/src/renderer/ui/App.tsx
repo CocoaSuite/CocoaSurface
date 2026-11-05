@@ -10,7 +10,8 @@ import { Layers, addLayer, duplicate, removeCurrentLayer } from './Layers';
 import { Shelf } from './Shelf';
 import { Properties } from './Properties';
 import { Start } from './Start';
-import { TextureSets } from './TextureSets';
+import { DisplaySettings, TextureSetList, TextureSetSettings } from './TextureSets';
+import { DockSide, DockSplit, EdgeZones, TITLES, resetLayout, shown, togglePanel, useDock, type PanelId } from './Dock';
 import { ViewportPane, viewport } from './ViewportPane';
 
 const TOOLS: { id: Tool; icon: 'brush' | 'eraser' | 'fill' | 'smudge' | 'blur' | 'picker'; label: string }[] = [
@@ -80,6 +81,9 @@ export function App() {
   const history = useApp((s) => s.history);
   const [exporting, setExporting] = useState(false);
   const [baking, setBaking] = useState(false);
+  const dock = useDock();
+  const panel = (p: PanelId) =>
+    p === 'list' ? <TextureSetList /> : p === 'settings' ? <TextureSetSettings onBake={() => setBaking(true)} /> : p === 'display' ? <DisplaySettings /> : p === 'layers' ? <Layers /> : p === 'properties' ? <Properties /> : <Shelf />;
 
   useEffect(() => {
     void recover();
@@ -164,6 +168,14 @@ export function App() {
         { label: get().view.ortho ? 'Perspective' : 'Orthographic', onSelect: () => set((s) => ({ view: { ...s.view, ortho: !s.view.ortho } })) },
       ],
     },
+    {
+      label: 'Window',
+      items: [
+        ...(Object.keys(TITLES) as PanelId[]).map((p) => ({ label: `${shown(p) ? 'Hide' : 'Show'} ${TITLES[p]}`, onSelect: () => togglePanel(p) })),
+        'separator',
+        { label: 'Reset layout', onSelect: resetLayout },
+      ],
+    },
   ];
 
   return (
@@ -181,16 +193,23 @@ export function App() {
               <ToolButton key={t.id} icon={t.icon} label={t.label} active={tool === t.id} onClick={() => set({ tool: t.id })} />
             ))}
           </div>
-          <div className="cs-center">
-            <ViewportPane />
-            <Shelf />
-          </div>
-          <div className="cs-side m">
-            <TextureSets onBake={() => setBaking(true)} />
-            <Layers />
-          </div>
-          <div className="cs-side r">
-            <Properties />
+          <div className="cs-work">
+            <div className="cs-side l" style={{ width: dock.left.length ? dock.w.left : 0 }}>
+              <DockSide side="left" render={panel} />
+            </div>
+            <DockSplit side="left" />
+            <div className="cs-center">
+              <ViewportPane />
+              <DockSplit side="bottom" />
+              <div className="cs-side b" style={{ height: dock.bottom.length ? dock.w.bottom : 0 }}>
+                <DockSide side="bottom" render={panel} />
+              </div>
+            </div>
+            <DockSplit side="right" />
+            <div className="cs-side r" style={{ width: dock.right.length ? dock.w.right : 0 }}>
+              <DockSide side="right" render={panel} />
+            </div>
+            <EdgeZones />
           </div>
         </div>
       ) : (

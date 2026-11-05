@@ -119,16 +119,15 @@ export function Shelf() {
   const used = (id: string) => get().project!.textureSets.some((t) => allLayers(t.layers).some((l) => l.kind === 'fill' && l.use?.material === id));
   return (
     <div className="cs-shelf">
-      <div className="cs-shcats">
-        {CATS.map((c) => (
-          <button key={c.id} type="button" className={c.id === cat ? 'on' : ''} onClick={() => (setCat(c.id), setPicked(null))}>
-            {c.label}
-          </button>
-        ))}
-      </div>
       <div className="cs-shbody">
         <div className="cs-shbar">
-          <span className="cs-shtitle">Assets</span>
+          <select className="cs-select" aria-label="Asset type" value={cat} onChange={(e) => (setCat(e.target.value as ShelfItem['kind']), setPicked(null))}>
+            {CATS.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
+            ))}
+          </select>
           <span className="cs-shsearch">
             <Icon name="search" size={14} />
             <input className="cs-input" placeholder="Search" aria-label="Search assets" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />

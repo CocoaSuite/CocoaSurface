@@ -5,12 +5,35 @@
 .cs-ctxbar > span { color: var(--mute); font-size: 12px; margin-left: 6px; }
 .cs-ctxbar .cs-tool { width: 28px; height: 26px; }
 
-.cs-main { display: grid; grid-template-columns: 44px minmax(0, 1fr) 320px 290px; min-height: 0; }
+.cs-main { display: grid; grid-template-columns: 44px minmax(0, 1fr); min-height: 0; }
 .cs-rail { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; }
-.cs-center { display: grid; grid-template-rows: minmax(0, 1fr) 210px; min-width: 0; min-height: 0; }
-.cs-side { background: var(--panel); display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; min-height: 0; border-left: 1px solid var(--line); }
-.cs-side.m { grid-template-rows: minmax(150px, 0.75fr) minmax(0, 1.5fr); }
-.cs-side.r { grid-template-rows: minmax(0, 1fr); }
+.cs-work { position: relative; display: flex; min-width: 0; min-height: 0; }
+.cs-center { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.cs-center > .cs-view { flex: 1; }
+.cs-side { flex: none; background: var(--panel); display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+.cs-dock { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.cs-dock.bottom { flex-direction: row; }
+.cs-gwrap { flex-basis: 0; display: flex; flex-direction: column; min-width: 0; min-height: 60px; }
+.cs-dock.bottom .cs-gwrap { flex-direction: row; min-width: 120px; }
+.cs-group { position: relative; flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.cs-gbody { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.cs-gsplit { flex: none; height: 5px; cursor: ns-resize; background: var(--bg); }
+.cs-gsplit.x { width: 5px; height: auto; cursor: ew-resize; }
+.cs-dsplit { flex: none; width: 5px; cursor: ew-resize; background: var(--bg); }
+.cs-dsplit.bottom { width: auto; height: 5px; cursor: ns-resize; }
+.cs-gsplit:hover, .cs-dsplit:hover { background: var(--line); }
+.cs-gdrop { position: absolute; inset: 30px 0 0; z-index: 30; }
+.cs-gdrop i { position: absolute; inset: 0; background: rgba(75, 156, 255, 0.18); border: 1px solid var(--sel); pointer-events: none; }
+.cs-gdrop i.before { bottom: 60%; }
+.cs-gdrop i.after { top: 60%; }
+.cs-gdrop i.before.x { bottom: 0; right: 60%; }
+.cs-gdrop i.after.x { top: 0; left: 60%; }
+.cs-edge { position: absolute; z-index: 30; background: rgba(75, 156, 255, 0.08); border: 1px dashed var(--sel); }
+.cs-edge.on { background: rgba(75, 156, 255, 0.22); }
+.cs-edge.left { left: 0; top: 0; bottom: 0; width: 56px; }
+.cs-edge.right { right: 0; top: 0; bottom: 0; width: 56px; }
+.cs-edge.bottom { left: 0; right: 0; bottom: 0; height: 56px; }
+.cs-subhead { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; color: var(--mute); font-size: 12px; flex: none; }
 .cs-pane { display: flex; flex-direction: column; min-height: 0; }
 .cs-pane + .cs-pane { border-top: 1px solid var(--line); }
 .cs-pane .cs-scroll { flex: 1; padding: 0 8px 10px; }
@@ -19,9 +42,8 @@
 .cs-acts .cs-ic { padding: 3px 5px; background: none; border-color: transparent; }
 .cs-acts .cs-ic:hover:not(:disabled) { background: var(--panel2); }
 
-.cs-dockhead { display: flex; align-items: center; gap: 2px; padding: 0 6px; height: 30px; flex: none; background: var(--bg); border-bottom: 1px solid var(--line); overflow: hidden; }
-.cs-dockhead > .cs-btn { margin-left: auto; }
-.cs-dtab { background: none; border: 0; padding: 0 6px; height: 30px; font-size: 11px; color: var(--mute); white-space: nowrap; cursor: pointer; border-bottom: 2px solid transparent; }
+.cs-dockhead { display: flex; align-items: center; gap: 2px; padding: 0 6px; height: 30px; flex: none; background: var(--bg); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.cs-dtab { background: none; border: 0; padding: 0 8px; height: 30px; font-size: 12px; color: var(--mute); white-space: nowrap; cursor: grab; border-bottom: 2px solid transparent; flex: none; }
 .cs-dtab.on { color: var(--fg); border-bottom-color: var(--fg); }
 .cs-dtab:hover { color: var(--fg); }
 .cs-lbar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
@@ -41,18 +63,15 @@
 .cs-lblend select { width: 60px; }
 .cs-lblend input { width: 34px; text-align: right; }
 
-.cs-shelf { display: grid; grid-template-columns: 130px minmax(0, 1fr); border-top: 1px solid var(--line); background: var(--panel); min-height: 0; }
-.cs-shcats { display: flex; flex-direction: column; padding: 6px 0; border-right: 1px solid var(--line); overflow: auto; }
-.cs-shcats button { background: none; border: 0; text-align: left; padding: 5px 12px; color: var(--mute); cursor: pointer; font-size: 12px; }
-.cs-shcats button:hover { color: var(--fg); }
-.cs-shcats button.on { color: var(--fg); background: var(--rowsel); }
+.cs-shelf { flex: 1; display: flex; min-height: 0; min-width: 0; }
 .cs-shbody { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .cs-shbar { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-bottom: 1px solid var(--line); }
-.cs-shtitle { font-size: 12px; color: var(--mute); margin-right: 4px; }
-.cs-shsearch { display: flex; align-items: center; gap: 6px; flex: 0 1 240px; color: var(--mute); }
+.cs-shbar { flex-wrap: wrap; }
+.cs-shbar .cs-select { flex: 1 1 120px; height: 26px; padding: 2px 4px; }
+.cs-shsearch { display: flex; align-items: center; gap: 6px; flex: 1 1 140px; color: var(--mute); }
 .cs-shsearch .cs-input { height: 24px; }
 .cs-shbar .cs-ic { padding: 3px 5px; background: none; border-color: transparent; }
-.cs-shgrid { flex: 1; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); align-content: start; gap: 6px; padding: 8px; }
+.cs-shgrid { flex: 1; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); align-content: start; gap: 6px; padding: 8px; }
 .cs-shitem { display: flex; flex-direction: column; gap: 4px; background: none; border: 1px solid transparent; border-radius: 4px; padding: 4px; cursor: pointer; font-size: 11px; color: var(--mute); text-align: center; }
 .cs-shitem:hover { background: var(--panel2); color: var(--fg); }
 .cs-shitem.on { border-color: var(--sel); color: var(--fg); }
@@ -131,3 +150,5 @@
 .cs-lbar .cs-select { flex: 1 1 40%; }
 .cs-lbar .cs-acts { flex: 1 0 100%; justify-content: space-between; }
 .cs-lblend.own select, .cs-lblend.own input { border-color: var(--sel); }
+.cs-gbody > .cs-scroll { flex: 1; padding: 0 8px 10px; }
+.cs-shgrid > .cs-empty { grid-column: 1 / -1; }

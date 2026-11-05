@@ -307,9 +307,6 @@ export function Layers() {
     });
   return (
     <div className="cs-pane cs-layers">
-      <div className="cs-dockhead">
-        <span className="cs-dtab on">Layers</span>
-      </div>
       <div className="cs-lbar">
         <select className="cs-select" aria-label="Texture set" value={setId ?? ''} onChange={(e) => set({ setId: e.target.value, layerId: project.textureSets.find((x) => x.id === e.target.value)?.layers[0]?.id ?? null, maskItem: null, effect: null })}>
           {project.textureSets.map((x) => (

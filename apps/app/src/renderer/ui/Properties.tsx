@@ -511,9 +511,6 @@ export function Properties() {
   if (!t || !l)
     return (
       <div className="cs-pane">
-        <div className="cs-dockhead">
-          <span className="cs-dtab on">Properties</span>
-        </div>
         <div className="cs-empty" style={{ padding: '0 12px' }}>
           Pick a layer to change it.
         </div>
@@ -525,8 +522,8 @@ export function Properties() {
   const what = maskEdit ? (painting ? `${TOOL_NAMES[tool]} (mask)` : 'Mask') : fx ? fx.name : l.kind === 'fill' ? 'Fill' : l.kind === 'group' ? 'Folder' : TOOL_NAMES[tool];
   return (
     <div className="cs-pane">
-      <div className="cs-dockhead">
-        <span className="cs-dtab on">Properties - {what}</span>
+      <div className="cs-subhead">
+        <span>{what}</span>
         {!own && (
           <Button size="sm" onClick={() => set({ maskItem: null, effect: null })}>
             Layer
