@@ -404,35 +404,43 @@ bool traceAll(vec3 ro, vec3 rd, out vec3 n, out float dist) {
 #endif
 
 #if STAGE == 3
-// Blend in the normals of surfaces within the radius, picked on discs around the point along three axes.
+// Rounds hard edges: finds the faces that meet this one within reach (from inside the solid for outer
+// edges, from outside for inner corners) and turns the normal toward each, half way right at the edge.
+vec3 bendTo(vec3 n, vec3 m, float h, inout vec3 hm[3], inout float hd[3], inout int cnt) {
+  float c = clamp(dot(n, m), -1., 1.);
+  if (c > .9998 || c < -.5) return n;
+  float reach = u_bevelR * tan(.5 * acos(c));
+  if (h >= reach) return n;
+  for (int j = 0; j < 3; j++) if (j < cnt && dot(hm[j], m) > .995) { if (h < hd[j]) hd[j] = h; return n; }
+  if (cnt < 3) { hm[cnt] = m; hd[cnt] = h; cnt++; }
+  return n;
+}
 vec3 bevel(vec3 p, vec3 n) {
   vec3 t, b;
   frame(n, t, b);
-  vec3 sum = n * .5;
-  vec3 ax = n, dp = p;
-  for (int i = 0; i < 128; i++) {
-    if (i >= u_bevelN * 2) break;
-    if (i % 2 == 0) {
-      // The same spiral of points around every texel, so the rounding is smooth rather than grainy.
-      int k = i / 2, a = k % 4;
-      vec3 a1 = t, a2 = b;
-      ax = n;
-      if (a == 2) { ax = t; a1 = b; a2 = n; } else if (a == 3) { ax = b; a1 = n; a2 = t; }
-      float ang = float(k) * 2.3999632, rr = u_bevelR * sqrt((float(k) + .5) / float(u_bevelN));
-      dp = p + (a1 * cos(ang) + a2 * sin(ang)) * rr;
-    }
-    vec3 dir = i % 2 == 0 ? -ax : ax;
-    vec3 ro = dp - dir * u_bevelR;
-    vec3 hn; float d;
-    if (!traceAll(ro, dir, hn, d) || d > 2. * u_bevelR) continue;
-    vec3 hp = ro + dir * d;
-    float dist = length(hp - p);
-    if (dist >= u_bevelR || dot(hn, n) < -.2) continue;
-    float above = dot(hp - p, n);
-    if ((u_bevelEdges == 1 && above > u_bevelR * .05) || (u_bevelEdges == 2 && above < -u_bevelR * .05)) continue;
-    sum += hn * (1. - dist / u_bevelR);
+  vec3 hm[3]; float hd[3]; int cnt = 0;
+  float eps = u_bevelR * .02, far = u_bevelR * 4.;
+  int dirs = max(u_bevelN, 8);
+  for (int i = 0; i < 64; i++) {
+    if (i >= dirs) break;
+    float a = 6.2831853 * (float(i) + .5) / float(dirs);
+    vec3 d = t * cos(a) + b * sin(a);
+    vec3 m; float h;
+    if (u_bevelEdges != 2 && traceAll(p - n * eps, d, m, h) && h < far && dot(m, d) > .05) bendTo(n, m, h, hm, hd, cnt);
+    if (u_bevelEdges != 1 && traceAll(p + n * eps, d, m, h) && h < far && dot(m, d) < -.05) bendTo(n, m, h, hm, hd, cnt);
   }
-  return normalize(sum);
+  vec3 o = n;
+  for (int j = 0; j < 3; j++) {
+    if (j >= cnt) break;
+    vec3 m = hm[j];
+    float th = acos(clamp(dot(n, m), -1., 1.));
+    float s = hd[j] / (u_bevelR * tan(.5 * th));
+    float w = .5 * (1. - s);
+    vec3 ax = normalize(m - n * dot(m, n));
+    vec3 r = n * cos(w * th) + ax * sin(w * th);
+    o += r - n;
+  }
+  return normalize(o);
 }
 #endif
 
