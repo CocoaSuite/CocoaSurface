@@ -1,4 +1,4 @@
-import { BAKE_DEFAULTS, type BakeSettings, type TextureSet } from '@cocoasurface/project';
+import { BAKE_DEFAULTS, type BakeSettings, type MeshMap, type TextureSet } from '@cocoasurface/project';
 import * as THREE from 'three';
 import { autoCage, cageDirections, bakeSet, bakeSource, disposeSource, partName, stem, type BakeSource, type BakeSources } from './engine/bake';
 import { engine } from './engine/engine';
@@ -88,6 +88,13 @@ export async function bake(ids: string[], st: BakeSettings): Promise<void> {
   const useHigh = st.useHigh && !!engine.high;
   if (st.useHigh && !engine.high) toast('No high-poly model: baking from the mesh itself');
   set({ job: { label: 'Preparing', share: 0, cancel: () => (stop = true) } });
+  const mode = get().view.mode;
+  let showing: string | null = null;
+  const shown = (m: MeshMap) => {
+    if (showing !== m) set((s) => ({ view: { ...s.view, mode: `mesh:${m}` } }));
+    else engine.onChange?.();
+    showing = m;
+  };
   await new Promise((r) => setTimeout(r, 30));
   let finished = 0;
   try {
@@ -100,7 +107,7 @@ export async function bake(ids: string[], st: BakeSettings): Promise<void> {
       if (!g || !t) continue;
       g.ensure();
       const run = { ...st, cages: useHigh && st.autoCage ? measureCages(id, st) : st.cages };
-      const ok = await bakeSet(g, engine.model, src, useHigh, run, bevel, lights, (p) => set((s) => ({ job: s.job && { ...s.job, label: `Baking ${t.name}`, share: (i + p.done / p.total) / ids.length } })), () => stop);
+      const ok = await bakeSet(g, engine.model, src, useHigh, run, bevel, lights, (p) => set((s) => ({ job: s.job && { ...s.job, label: `Baking ${t.name}`, share: (i + p.done / p.total) / ids.length } })), () => stop, shown);
       if (!ok) break;
       finished++;
       set((s) => ({
@@ -112,7 +119,7 @@ export async function bake(ids: string[], st: BakeSettings): Promise<void> {
   } catch (e) {
     toast(`Baking failed: ${(e as Error).message}`);
   } finally {
-    set({ job: null });
+    set((s) => ({ job: null, view: { ...s.view, mode } }));
   }
   if (stop) toast(finished ? `Stopped after ${finished} texture set(s)` : 'Baking stopped');
   else if (finished) toast(`Baked ${finished} texture set${finished === 1 ? '' : 's'}`);

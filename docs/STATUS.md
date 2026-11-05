@@ -15,6 +15,10 @@ Laid out like Substance Painter: menu bar, tool options bar, toolbar on the left
 - Groups take effects: they run on what the group's layers make.
 - Export presets (CocoaWorlds, glTF / Blender, Unreal, Unity URP, Godot), packing (separate, ORM, Unity metal-smoothness) and per-map ticks (`export.skip`).
 
+## Baking interface
+
+The Bake panel sits over the left dock (not modal), so the viewport and cage stay in view; closing it turns the cage display off. While baking, the viewport shows each map as it's made (`shown` callback from `bakeSet`; ray maps refine pass by pass), then goes back to the view it had.
+
 ## Bake lights and occlusion casters
 
 - The Bake dialog lists the meshes occlusion is cast against (the high-poly's when baking from it); untick one and it no longer darkens anything (`aoExclude`, a separate BVH in `baking.ts`). Bake lights use the same set.

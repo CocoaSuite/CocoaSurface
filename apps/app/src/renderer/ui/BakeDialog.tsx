@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Button, Dialog, Field, Switch } from '@cocoasurface/ui';
+import { createPortal } from 'react-dom';
+import { Button, Field, IconButton, Switch } from '@cocoasurface/ui';
 import { BEVEL_DEFAULTS, MESH_MAPS, TEXTURE_SIZES, type BakeSettings, type Bevel, type TextureSize } from '@cocoasurface/project';
 import { bake, dropHighPoly, loadHighPoly, measureCages, meshesOf, occluderNames, pairsOf, settingsOf } from '../baking';
 import { commit, currentSet, edit, live, set, useApp } from '../store';
@@ -21,7 +22,12 @@ export function BakeDialog({ onClose, draft }: { onClose: () => void; draft?: Ba
   const occluders = occluderNames(st.useHigh && high);
   const lights = project.bakeLights?.length ?? 0;
   useEffect(() => set({ cagePreview: st }), [st]);
-  useEffect(() => () => set({ cagePreview: null }), []);
+  useEffect(() => () => set((s) => ({ cagePreview: null, view: { ...s.view, cage: false } })), []);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && !(e.target as HTMLElement).closest?.('input, select') && onClose();
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [onClose]);
   const go = () => {
     onClose();
     void bake(all ? project.textureSets.map((x) => x.id) : [t.id], st);
@@ -36,8 +42,14 @@ export function BakeDialog({ onClose, draft }: { onClose: () => void; draft?: Ba
     </select>
   );
 
-  return (
-    <Dialog title="Bake mesh maps" onClose={onClose} width={920}>
+  const host = document.querySelector('.cs-work');
+  if (!host) return null;
+  return createPortal(
+    <div className="cs-box cs-bakepanel" role="dialog" aria-label="Bake mesh maps">
+      <div className="cs-bakehead">
+        <h2>Bake mesh maps</h2>
+        <IconButton icon="close" label="Close" onClick={onClose} />
+      </div>
       <div className="cs-bake">
         <div className="cs-col">
           <Chips options={MESH_MAPS.map((m) => ({ value: m.id, label: m.label }))} value={st.maps} onChange={(v) => put('maps', MESH_MAPS.map((m) => m.id).filter((m) => v.includes(m)))} />
@@ -223,6 +235,7 @@ export function BakeDialog({ onClose, draft }: { onClose: () => void; draft?: Ba
           Bake
         </Button>
       </div>
-    </Dialog>
+    </div>,
+    host,
   );
 }

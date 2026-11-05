@@ -647,6 +647,8 @@ export async function bakeSet(
   lights: BakeLight[],
   progress: (p: BakeProgress) => void,
   cancelled: () => boolean,
+  /** Called each time a map's preview has been updated. */
+  shown: (m: MeshMap) => void = () => {},
 ): Promise<boolean> {
   const r = g.p.r;
   const size = st.size;
@@ -811,6 +813,16 @@ export async function bakeSet(
       }
       t.scissorTest = false;
       progress({ done: i + 1, total });
+      // Show the map as it comes along: after each ray pass, or once it's done.
+      const m = (ps.out === 'sn' ? 'worldNormal' : ps.out) as MeshMap;
+      if (st.maps.includes(m) && (ps.seed > 0 || passes[i + 1]?.out !== ps.out)) {
+        enc.uniforms.u_src!.value = t.texture;
+        enc.uniforms.u_div!.value = ps.seed > 0 ? ps.seed * PER_PASS : 1;
+        enc.uniforms.u_kind!.value = m === 'worldNormal' ? 1 : 0;
+        g.setBaked(m, (out) => g.p.run(enc, out), size);
+        shown(m);
+        await new Promise((res) => requestAnimationFrame(res));
+      }
     }
     if (want.has('curvature')) {
       const t = float();
@@ -842,6 +854,7 @@ export async function bakeSet(
       enc.uniforms.u_div!.value = (m === 'occlusion' && mix === 0) || m === 'thickness' || m === 'light' ? div : 1;
       enc.uniforms.u_kind!.value = m === 'worldNormal' ? 1 : 0;
       g.setBaked(m as MeshMap, (out) => g.p.run(enc, out), size);
+      if (m === 'curvature') shown(m);
     }
     for (const m of [...g.baked.keys()]) if (!want.has(m)) g.dropBaked(m);
     progress({ done: total, total });

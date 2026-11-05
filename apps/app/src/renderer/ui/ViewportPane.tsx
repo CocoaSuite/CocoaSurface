@@ -64,7 +64,7 @@ export function ViewportPane() {
           ))}
           {baked.length > 0 && (
             <optgroup label="Mesh maps">
-              {MESH_MAPS.filter((m) => baked.includes(m.id)).map((m) => (
+              {MESH_MAPS.filter((m) => baked.includes(m.id) || view.mode === `mesh:${m.id}`).map((m) => (
                 <option key={m.id} value={`mesh:${m.id}`}>
                   {m.label}
                 </option>
