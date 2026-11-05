@@ -89,6 +89,8 @@ export interface BakeSettings {
   curvatureStrength: number;
   /** High-poly (or low-poly) meshes, by name, that don't darken anything in occlusion. */
   aoExclude?: string[];
+  /** Smooth the noise out of occlusion, thickness and light. */
+  denoise?: boolean;
   /** How much the bake lights brighten the occlusion map, 0 to 1. */
   lightMix?: number;
 }

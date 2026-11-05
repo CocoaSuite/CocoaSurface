@@ -5,7 +5,7 @@ import { CHANNELS, MESH_MAPS } from '@cocoasurface/project';
 import { Viewport } from '../engine/viewport';
 import { setView } from '../io';
 import { engine } from '../engine/engine';
-import { currentSet, set, useApp, type ViewMode } from '../store';
+import { currentLayer, currentSet, set, useApp, type ViewMode } from '../store';
 
 let current: Viewport | null = null;
 export const viewport = () => current;
@@ -13,6 +13,7 @@ export const viewport = () => current;
 export function ViewportPane() {
   const ref = useRef<HTMLDivElement>(null);
   const view = useApp((s) => s.view);
+  const hasMask = useApp((s) => !!(s.layerId && s.project && currentLayer()?.mask));
   const busy = useApp((s) => s.busy);
   const warnings = useApp((s) => s.warnings);
   const job = useApp((s) => s.job);
@@ -62,6 +63,7 @@ export function ViewportPane() {
               {c.label}
             </option>
           ))}
+          {(hasMask || view.mode === 'mask') && <option value="mask">Mask</option>}
           {baked.length > 0 && (
             <optgroup label="Mesh maps">
               {MESH_MAPS.filter((m) => baked.includes(m.id) || view.mode === `mesh:${m.id}`).map((m) => (

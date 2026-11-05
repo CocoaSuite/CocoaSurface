@@ -287,7 +287,7 @@ class Engine {
     return m;
   }
 
-  channelMaterial(set: string, c: Channel | `mesh:${MeshMap}` | 'bake:skew' | 'bake:offset'): THREE.MeshBasicMaterial {
+  channelMaterial(set: string, c: Channel | `mesh:${MeshMap}` | 'bake:skew' | 'bake:offset' | 'mask'): THREE.MeshBasicMaterial {
     let m = this.flat.get(set);
     if (!m) {
       m = new THREE.MeshBasicMaterial({ toneMapped: false, side: THREE.DoubleSide });
@@ -296,7 +296,13 @@ class Engine {
     }
     const g = this.sets.get(set);
     const bk = c.startsWith('bake:') ? (c.slice(5) as 'skew' | 'offset') : null;
-    const tex = (bk ? (this.active?.layer === BAKE_LAYER ? g?.live.get(bk) : null) ?? g?.target(BAKE_LAYER, bk) : c.startsWith('mesh:') ? g?.baked.get(c.slice(5) as MeshMap) : g?.display.get(c as Channel))?.texture ?? null;
+    const lid = get().layerId;
+    const tex =
+      c === 'mask'
+        ? lid
+          ? (g?.maskTexture(lid) ?? null)
+          : null
+        : ((bk ? ((this.active?.layer === BAKE_LAYER ? g?.live.get(bk) : null) ?? g?.target(BAKE_LAYER, bk)) : c.startsWith('mesh:') ? g?.baked.get(c.slice(5) as MeshMap) : g?.display.get(c as Channel))?.texture ?? null);
     if (m.map !== tex) {
       m.map = tex;
       m.needsUpdate = true;

@@ -74,7 +74,7 @@ export class Viewport {
     engine.onChange = () => this.redraw();
     this.bindInput();
     this.unsub = useApp.subscribe((s, p) => {
-      if (s.view !== p.view || s.project !== p.project || s.setId !== p.setId) this.applyView();
+      if (s.view !== p.view || s.project !== p.project || s.setId !== p.setId || (s.layerId !== p.layerId && s.view.mode === 'mask')) this.applyView();
       if (s.view.cage !== p.view.cage || s.cagePreview !== p.cagePreview || s.project !== p.project || s.setId !== p.setId) this.showCage();
       if (s.lightEdit !== p.lightEdit || s.lightSel !== p.lightSel || s.project?.bakeLights !== p.project?.bakeLights) {
         if (!!s.lightEdit !== !!p.lightEdit) this.applyView();

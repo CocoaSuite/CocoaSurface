@@ -44,7 +44,7 @@ function createWindow(): void {
     title: 'CocoaSurface',
     // The app's own top bar is the title bar; the system draws its window buttons over its right end (left on macOS).
     titleBarStyle: 'hidden',
-    titleBarOverlay: process.platform === 'darwin' ? true : { color: '#1a1a1a', symbolColor: '#e8e8e8', height: 38 },
+    titleBarOverlay: process.platform === 'darwin' ? true : { color: '#1a1a1a', symbolColor: '#e8e8e8', height: 37 },
     icon: path.join(__dirname, '../../build/icon.png'),
     show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false },

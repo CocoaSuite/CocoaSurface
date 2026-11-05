@@ -417,6 +417,11 @@ export class SetGPU {
   private maskRts = new Map<string, THREE.WebGLRenderTarget>();
   private maskWork: [THREE.WebGLRenderTarget, THREE.WebGLRenderTarget] | null = null;
 
+  /** A layer's mask as last built, if it has one. */
+  maskTexture(layer: string): THREE.Texture | null {
+    return this.maskRts.get(layer)?.texture ?? null;
+  }
+
   /** A layer's mask, built from its items. */
   maskOf(layer: string, m: Mask, active: { layer: string; keys: Key[] } | null, image: (file: string) => THREE.Texture | null): THREE.WebGLRenderTarget {
     if (!this.maskWork || this.maskWork[0].width !== this.size) {

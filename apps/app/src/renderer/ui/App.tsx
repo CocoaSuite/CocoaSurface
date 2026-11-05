@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Divider, MenuBar, NumberField, Segmented, Spacer, Toast, ToolButton, type MenuEntry } from '@cocoasurface/ui';
+import { Button, Divider, MenuBar, NumberField, Segmented, Spacer, Toast, ToolButton, type MenuEntry } from '@cocoasurface/ui';
 import { CHANNELS, MESH_MAPS } from '@cocoasurface/project';
 import { autosave, exportSetMaterial, importMaterials, importModelInto, newFromModel, openProject, recover, saveProject } from '../io';
 import { currentSet, get, redo, set, undo, useApp, type Brush, type Tool, type ViewMode } from '../store';
@@ -27,7 +27,7 @@ const TOOLS: { id: Tool; icon: 'brush' | 'eraser' | 'fill' | 'smudge' | 'blur' |
 
 const KEYS: Record<string, Tool> = { Digit1: 'paint', Digit2: 'erase', Digit4: 'fill', Digit5: 'smudge', KeyP: 'picker' };
 
-function ContextBar() {
+function ContextBar({ onBake }: { onBake: () => void }) {
   const b = useApp((s) => s.brush);
   const sym = useApp((s) => s.symmetry);
   const tool = useApp((s) => s.tool);
@@ -41,6 +41,14 @@ function ContextBar() {
       </>
     );
   };
+  const busy = useApp((s) => !!s.job);
+  const bake = (
+    <span className="cs-bakebtn">
+      <Button size="sm" disabled={busy || !currentSet()} onClick={onBake}>
+        Bake mesh maps
+      </Button>
+    </span>
+  );
   return (
     <div className="cs-ctxbar cs-brushbar">
       {tool === 'fill' ? (
@@ -64,6 +72,7 @@ function ContextBar() {
           <NumberField value={b.stabilize} label="" ariaLabel="Lazy mouse" onChange={(v) => put({ stabilize: Math.max(0, Math.min(100, v)) })} onCommit={(v) => put({ stabilize: Math.max(0, Math.min(100, v)) })} />
         </>
       )}
+      {bake}
     </div>
   );
 }
@@ -190,7 +199,7 @@ export function App() {
         <MenuBar menus={menus} />
         <Spacer />
       </div>
-      {has && <ContextBar />}
+      {has && <ContextBar onBake={() => setBaking(true)} />}
       {has ? (
         <div className="cs-main">
           <div className="cs-rail">

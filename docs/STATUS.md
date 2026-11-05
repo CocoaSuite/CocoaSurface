@@ -17,6 +17,9 @@ Laid out like Substance Painter: menu bar, tool options bar, toolbar on the left
 
 ## Baking interface
 
+Bake mesh maps sits at the right end of the tool options bar. Occlusion, thickness and light rays follow a low-discrepancy (R2) sequence shifted per texel, and a denoise pass (on by default) averages nearby texels of the same surface (weighted by position and normal) before encoding. The viewport's display list has Mask when the selected layer has one.
+
+
 The Bake panel sits over the left dock (not modal), so the viewport and cage stay in view; closing it turns the cage display off. While baking, the viewport shows each map as it's made (`shown` callback from `bakeSet`; ray maps refine pass by pass), then goes back to the view it had.
 
 ## Bake lights and occlusion casters

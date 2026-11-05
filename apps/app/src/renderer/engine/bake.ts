@@ -358,6 +358,23 @@ void frame(vec3 n, out vec3 t, out vec3 b) {
   b = cross(n, t);
 }
 
+/** Cosine-weighted direction from a point in the unit square. */
+vec3 hemiAt(vec3 n, vec2 xi) {
+  vec3 t, b;
+  frame(n, t, b);
+  float a = xi.x * 6.2831853, r = sqrt(xi.y);
+  return normalize(t * cos(a) * r + b * sin(a) * r + n * sqrt(max(0., 1. - r * r)));
+}
+
+/** The k-th point of a low-discrepancy (R2) sequence, shifted per texel so neighbours don't share a pattern. */
+vec2 r2(int k) {
+  uint h = uint(gl_FragCoord.x) * 73856093u ^ uint(gl_FragCoord.y) * 19349663u;
+  h = (h ^ (h >> 16)) * 0x45d9f3bu;
+  h = (h ^ (h >> 16)) * 0x45d9f3bu;
+  vec2 shift = vec2(float(h & 0xffffu), float(h >> 16)) / 65535.;
+  return fract(shift + vec2(.7548776662, .5698402910) * float(k));
+}
+
 vec3 hemi(vec3 n) {
   vec3 t, b;
   frame(n, t, b);
@@ -470,7 +487,7 @@ void main() {
     for (int i = 0; i < 64; i++) {
       if (i >= u_samples) break;
       vec3 hn; float d;
-      bool hit = traceAll(sp + side * eps, hemi(side), hn, d);
+      bool hit = traceAll(sp + side * eps, hemiAt(side, r2((int(u_seed) - 1) * u_samples + i)), hn, d);
       if (ao) sum += hit && d < u_dist ? (d / u_dist) * (d / u_dist) : 1.;
       else sum += hit ? min(d / u_dist, 1.) : 1.;
     }
@@ -553,6 +570,36 @@ void main() {
 }`;
 
 /** Down to the map's size (averaging the samples inside the UV islands), padded past the island edges. */
+/** Smooths ray noise: averages nearby texels of the same surface (close in position, facing the same way). */
+const DENOISE_FS = /* glsl */ `
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D u_src;
+uniform sampler2D u_sp;
+uniform sampler2D u_sn;
+uniform sampler2D u_island;
+uniform float u_div;
+uniform float u_px;
+uniform float u_step;
+uniform float u_sigma;
+void main() {
+  if (texture(u_island, vUv).r < .5) { o = vec4(texture(u_src, vUv).rgb / u_div, 1.); return; }
+  vec3 p = texture(u_sp, vUv).xyz, n = texture(u_sn, vUv).xyz;
+  vec3 s = vec3(0.);
+  float w = 0.;
+  for (int y = -4; y <= 4; y++)
+    for (int x = -4; x <= 4; x++) {
+      vec2 q = vUv + vec2(float(x), float(y)) * u_px * u_step;
+      if (texture(u_island, q).r < .5) continue;
+      vec3 dp = texture(u_sp, q).xyz - p;
+      float k = exp(-float(x * x + y * y) / 18. - dot(dp, dp) / (u_sigma * u_sigma)) * pow(max(dot(texture(u_sn, q).xyz, n), 0.), 8.);
+      s += texture(u_src, q).rgb * k;
+      w += k;
+    }
+  o = vec4(s / max(w, 1e-6) / u_div, 1.);
+}`;
+
 /** Occlusion brightened where the bake lights reach. */
 const LIGHT_MIX_FS = /* glsl */ `
 precision highp float;
@@ -560,10 +607,11 @@ in vec2 vUv;
 out vec4 o;
 uniform sampler2D u_a;
 uniform sampler2D u_b;
+uniform float u_divA;
 uniform float u_div;
 uniform float u_mix;
 void main() {
-  float ao = texture(u_a, vUv).r / u_div, l = clamp(texture(u_b, vUv).r / u_div, 0., 1.);
+  float ao = texture(u_a, vUv).r / u_divA, l = clamp(texture(u_b, vUv).r / u_div, 0., 1.);
   o = vec4(vec3(1. - (1. - ao) * (1. - u_mix * l)), 1.);
 }`;
 
@@ -753,7 +801,8 @@ export async function bakeSet(
   const quad = (fs: string, u: Record<string, THREE.IUniform>) => new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: QUAD, fragmentShader: fs, uniforms: u, depthTest: false, depthWrite: false });
   const curve = quad(CURVE_FS, { u_n: { value: null }, u_p: { value: null }, u_island: { value: islandHi.texture }, u_px: { value: 1 / work }, u_scale: { value: 0.12 * diag } });
   const curveN = quad(CURVE_N_FS, { u_n: { value: null }, u_island: { value: islandHi.texture }, u_px: { value: ss / work }, u_scale: { value: 2.5 * st.curvatureStrength } });
-  const lightMix = quad(LIGHT_MIX_FS, { u_a: { value: null }, u_b: { value: null }, u_div: { value: 1 }, u_mix: { value: 0 } });
+  const lightMix = quad(LIGHT_MIX_FS, { u_a: { value: null }, u_b: { value: null }, u_divA: { value: 1 }, u_div: { value: 1 }, u_mix: { value: 0 } });
+  const denoise = quad(DENOISE_FS, { u_src: { value: null }, u_sp: { value: null }, u_sn: { value: null }, u_island: { value: islandHi.texture }, u_div: { value: 1 }, u_px: { value: 1 / work }, u_step: { value: ss }, u_sigma: { value: 0.006 * diag } });
   const enc = quad(ENCODE_FS, { u_src: { value: null }, u_islandHi: { value: islandHi.texture }, u_island: { value: island.texture }, u_px: { value: 1 / size }, u_div: { value: 1 }, u_ss: { value: ss }, u_kind: { value: 0 } });
   try {
     // Build every program before the heavy drawing starts.
@@ -838,20 +887,38 @@ export async function bakeSet(
     }
     if (want.has('worldNormal')) raw.set('worldNormal', raw.get('sn')!);
     const div = rayPasses * PER_PASS;
+    // Ray maps come out of here as plain values once smoothed.
+    const divOf = new Map<string, number>([['occlusion', div], ['thickness', div], ['light', div]]);
+    if (st.denoise !== false)
+      for (const m of ['occlusion', 'thickness', 'light'])
+        if (raw.get(m)) {
+          const t = float();
+          denoise.uniforms.u_src!.value = raw.get(m)!.texture;
+          denoise.uniforms.u_sp!.value = raw.get('sp')!.texture;
+          denoise.uniforms.u_sn!.value = raw.get('sn')!.texture;
+          denoise.uniforms.u_div!.value = div;
+          g.p.run(denoise, t);
+          pool.push(raw.get(m)!);
+          raw.set(m, t);
+          divOf.set(m, 1);
+        }
     if (mix > 0 && raw.get('occlusion') && raw.get('light')) {
       const t = float();
+      lightMix.uniforms.u_divA!.value = divOf.get('occlusion')!;
       lightMix.uniforms.u_a!.value = raw.get('occlusion')!.texture;
       lightMix.uniforms.u_b!.value = raw.get('light')!.texture;
-      lightMix.uniforms.u_div!.value = div;
+      lightMix.uniforms.u_div!.value = divOf.get('light')!;
       lightMix.uniforms.u_mix!.value = mix;
       g.p.run(lightMix, t);
+      pool.push(raw.get('occlusion')!);
       raw.set('occlusion', t);
+      divOf.set('occlusion', 1);
     }
     for (const m of st.maps) {
       const s = raw.get(m);
       if (!s) continue;
       enc.uniforms.u_src!.value = s.texture;
-      enc.uniforms.u_div!.value = (m === 'occlusion' && mix === 0) || m === 'thickness' || m === 'light' ? div : 1;
+      enc.uniforms.u_div!.value = divOf.get(m) ?? 1;
       enc.uniforms.u_kind!.value = m === 'worldNormal' ? 1 : 0;
       g.setBaked(m as MeshMap, (out) => g.p.run(enc, out), size);
       if (m === 'curvature') shown(m);
@@ -868,6 +935,7 @@ export async function bakeSet(
     curve.dispose();
     curveN.dispose();
     lightMix.dispose();
+    denoise.dispose();
     enc.dispose();
     zero.dispose();
     half.dispose();

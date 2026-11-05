@@ -3,7 +3,7 @@ import { findLayer, type Channel, type Layer, type BakeSettings, type MeshMap, t
 import type { LoadedMaterial } from './engine/library';
 
 export type Tool = 'paint' | 'erase' | 'fill' | 'smudge' | 'blur' | 'picker';
-export type ViewMode = 'material' | Channel | `mesh:${MeshMap}` | 'bake:skew' | 'bake:offset';
+export type ViewMode = 'material' | 'mask' | Channel | `mesh:${MeshMap}` | 'bake:skew' | 'bake:offset';
 
 export interface Brush {
   size: number;

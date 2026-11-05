@@ -162,3 +162,4 @@
 .cs-lights .cs-lr { width: 100%; background: none; border: 0; text-align: left; padding: 4px 6px; border-radius: 4px; color: inherit; cursor: pointer; }
 .cs-occ { display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow: auto; }
 .cs-occ label { display: flex; align-items: center; gap: 8px; }
+.cs-ctxbar .cs-bakebtn { margin-left: auto; }

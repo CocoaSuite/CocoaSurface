@@ -61,6 +61,9 @@ export function BakeDialog({ onClose, draft }: { onClose: () => void; draft?: Ba
           {(st.maps.includes('occlusion') || st.maps.includes('thickness')) && (
             <>
               <Field label="Rays">{select(st.aoSamples, [16, 32, 64, 128, 256].map((n) => [n, String(n)]), (v) => put('aoSamples', v))}</Field>
+              <Field label="Denoise">
+                <Switch checked={st.denoise !== false} onChange={(v) => put('denoise', v)} label="Smooth the noise out of ray-traced maps" />
+              </Field>
               <Field label="Distance">
                 <Range value={st.aoDistance * 100} min={1} max={100} step={1} label="Occlusion distance, % of the model" onChange={(v) => put('aoDistance', v / 100)} onCommit={(v) => put('aoDistance', v / 100)} />
               </Field>

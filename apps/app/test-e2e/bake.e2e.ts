@@ -463,6 +463,20 @@ test('occlusion can leave meshes out, and bake lights reach where the sky does n
     await pg.locator('.cs-box select').first().selectOption('512');
     await run();
     const inside = await mean('occlusion', 0.75, 0.75, 0.1);
+    // Ray noise: how much occlusion jumps between neighbouring texels on the smooth inner dome.
+    const grain = await pg.evaluate(() => {
+      const g = [...window.surface.engine.sets.values()][0];
+      const t = g.baked.get('occlusion');
+      const px = g.p.read(t), w = t.width;
+      let s = 0, n = 0;
+      for (let y = Math.floor(0.62 * w); y < 0.68 * w; y++)
+        for (let x = Math.floor(0.62 * w); x < 0.68 * w; x++) {
+          s += Math.abs(px[(y * w + x) * 4] - px[(y * w + x + 1) * 4]);
+          n++;
+        }
+      return s / n;
+    });
+    assert.ok(grain < 3, `occlusion is smooth (${grain.toFixed(2)})`);
 
     await openDialog();
     await pg.getByLabel('Ground casts occlusion').uncheck();
