@@ -377,3 +377,117 @@ test('a round high-poly model baked onto a few-sided low-poly one has clean rims
     srv.close();
   }
 }, 600_000);
+
+// An upside-down bowl on the ground: the outer dome maps to the left half, the inner one to the right, the ground below.
+function bowl(file) {
+  const v = [], t = [], f = [];
+  let k = 0;
+  const vert = (p, uv) => (v.push(`v ${p[0]} ${p[1]} ${p[2]}`), t.push(`vt ${uv[0]} ${uv[1]}`), ++k);
+  const dome = (r, cu, flip) => {
+    const rows = [];
+    for (let j = 0; j <= 12; j++) {
+      const th = (j / 12) * (Math.PI / 2);
+      rows.push(Array.from({ length: 33 }, (_, i) => {
+        const a = (i / 32) * 2 * Math.PI;
+        return vert([r * Math.sin(th) * Math.cos(a), r * Math.cos(th), r * Math.sin(th) * Math.sin(a)], [cu + 0.22 * (j / 12) * Math.cos(a), 0.75 + 0.22 * (j / 12) * Math.sin(a)]);
+      }));
+    }
+    for (let j = 0; j < 12; j++)
+      for (let i = 0; i < 32; i++) {
+        const a = rows[j][i], b = rows[j][i + 1], c = rows[j + 1][i + 1], d = rows[j + 1][i];
+        f.push(flip ? `f ${a}/${a} ${c}/${c} ${b}/${b}` : `f ${a}/${a} ${b}/${b} ${c}/${c}`, flip ? `f ${a}/${a} ${d}/${d} ${c}/${c}` : `f ${a}/${a} ${c}/${c} ${d}/${d}`);
+      }
+  };
+  const out = ['o Bowl', 'usemtl Clay'];
+  dome(1, 0.25, false);
+  dome(0.92, 0.75, true);
+  const bowlEnd = { v: v.length, f: f.length };
+  const g = [[-3, -3], [3, -3], [3, 3], [-3, 3]].map(([x, z]) => vert([x, -0.01, z], [0.05 + ((x + 3) / 6) * 0.4, 0.05 + ((z + 3) / 6) * 0.4]));
+  const gf = [`f ${g[0]}/${g[0]} ${g[2]}/${g[2]} ${g[1]}/${g[1]}`, `f ${g[0]}/${g[0]} ${g[3]}/${g[3]} ${g[2]}/${g[2]}`];
+  writeFileSync(file, [...out, ...v, ...t, ...f.slice(0, bowlEnd.f), 'o Ground', 'usemtl Clay', ...gf].join('\n'));
+}
+
+test('occlusion can leave meshes out, and bake lights reach where the sky does not', async () => {
+  const file = path.join(tmp, 'bowl.obj');
+  bowl(file);
+  const srv = createServer(async (q, r) => {
+    const u = decodeURIComponent(q.url.split('?')[0]);
+    const p = path.join(dist, u === '/' ? 'index.html' : u);
+    try {
+      r.setHeader('content-type', types[path.extname(p)] ?? 'application/octet-stream');
+      r.end(await readFile(p));
+    } catch {
+      r.statusCode = 404;
+      r.end();
+    }
+  }).listen(0);
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  try {
+    const pg = await browser.newPage({ viewport: { width: 1440, height: 860 } });
+    const errors = [];
+    pg.on('pageerror', (e) => errors.push(e.message));
+    // Mean of a baked map over a disc in UV space.
+    const mean = (map, cu, cv, r) =>
+      pg.evaluate(([map, cu, cv, r]) => {
+        const g = [...window.surface.engine.sets.values()][0];
+        const t = g.baked.get(map);
+        const px = g.p.read(t), w = t.width;
+        let s = 0, n = 0;
+        for (let y = 0; y < w; y++)
+          for (let x = 0; x < w; x++) {
+            const u = (x + 0.5) / w, v = (y + 0.5) / w;
+            if ((u - cu) ** 2 + (v - cv) ** 2 > r * r) continue;
+            s += px[(y * w + x) * 4];
+            n++;
+          }
+        return s / n / 255;
+      }, [map, cu, cv, r]);
+    const openDialog = () => pg.getByText(/Bake (mesh maps|again)…/).first().click();
+    const run = async () => {
+      await pg.getByRole('button', { name: 'Bake', exact: true }).click();
+      await pg.waitForFunction(() => !window.surface.get().job && window.surface.get().project.textureSets[0].bake, null, { timeout: 240_000 });
+      await pg.waitForTimeout(200);
+    };
+    await pg.goto(`http://localhost:${srv.address().port}/?inspect`);
+    const fc = pg.waitForEvent('filechooser');
+    await pg.getByText('New project from a model…').first().click();
+    await (await fc).setFiles(file);
+    await pg.waitForSelector('canvas.cs-gl');
+    await pg.getByRole('button', { name: 'Texture Set Settings' }).click();
+    await pg.locator('.cs-tsets select').first().selectOption('512');
+    await openDialog();
+    for (const m of ['Normal', 'World normal', 'Position', 'Curvature', 'Thickness', 'ID']) {
+      const c = pg.locator('.cs-box .cs-chip', { hasText: new RegExp(`^${m}$`) }).first();
+      if ((await c.getAttribute('aria-pressed')) === 'true') await c.click();
+    }
+    await pg.locator('.cs-box select').first().selectOption('512');
+    await run();
+    const inside = await mean('occlusion', 0.75, 0.75, 0.1);
+
+    await openDialog();
+    await pg.getByLabel('Ground casts occlusion').uncheck();
+    await run();
+    const noGround = await mean('occlusion', 0.75, 0.75, 0.1);
+    assert.ok(noGround > inside + 0.08, `leaving the ground out lightens the inside (${inside.toFixed(2)} to ${noGround.toFixed(2)})`);
+
+    await openDialog();
+    await pg.getByRole('button', { name: 'Place lights…' }).click();
+    await pg.getByRole('button', { name: 'Add light' }).click();
+    assert.equal(await pg.evaluate(() => window.surface.get().project.bakeLights.length), 1);
+    // Under the dome, near the ground.
+    await pg.evaluate(() => {
+      const s = window.surface.get();
+      const box = s.project.bakeLights[0];
+      window.surface.set({ project: { ...s.project, bakeLights: [{ ...box, position: [0, 0.05, 0], radius: 0.02 }] } });
+    });
+    await pg.getByRole('button', { name: 'Back to baking' }).click();
+    await pg.locator('.cs-box .cs-chip', { hasText: /^Light$/ }).click();
+    await run();
+    const litIn = await mean('light', 0.75, 0.75, 0.15), litOut = await mean('light', 0.25, 0.75, 0.15);
+    assert.ok(litIn > 0.3 && litIn > litOut + 0.25, `a light under the bowl lights its inside, not its outside (${litIn.toFixed(2)} against ${litOut.toFixed(2)})`);
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+    srv.close();
+  }
+}, 600_000);

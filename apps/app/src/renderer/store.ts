@@ -91,6 +91,9 @@ interface State {
   bakeValue: number;
   /** Bake settings being edited, so the cage shown follows them. */
   cagePreview: BakeSettings | null;
+  /** Placing bake lights in the viewport, with the Bake dialog's settings kept for when it opens again. */
+  lightEdit: BakeSettings | null;
+  lightSel: string | null;
   view: View;
   materials: Record<string, LoadedMaterial>;
   warnings: string[];
@@ -117,6 +120,8 @@ export const useApp = create<State>(() => ({
   bakePaint: null,
   bakeValue: 1,
   cagePreview: null,
+  lightEdit: null,
+  lightSel: null,
   view: { mode: 'material', wire: false, ortho: false, grid: true, light: 1, turn: 0, cage: false, env: 'studio', showEnv: false },
   materials: {},
   warnings: [],

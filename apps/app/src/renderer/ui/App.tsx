@@ -8,6 +8,7 @@ import { BakeDialog } from './BakeDialog';
 import { ExportDialog } from './ExportDialog';
 import { Layers, addLayer, duplicate, removeCurrentLayer } from './Layers';
 import { Shelf } from './Shelf';
+import { LightPanel } from './LightPanel';
 import { loadLibrary } from '../assets';
 import { Properties } from './Properties';
 import { Start } from './Start';
@@ -82,6 +83,8 @@ export function App() {
   const history = useApp((s) => s.history);
   const [exporting, setExporting] = useState(false);
   const [baking, setBaking] = useState(false);
+  const [draft, setDraft] = useState<import('@cocoasurface/project').BakeSettings | null>(null);
+  const lightEdit = useApp((s) => s.lightEdit);
   const dock = useDock();
   const panel = (p: PanelId) =>
     p === 'list' ? <TextureSetList /> : p === 'settings' ? <TextureSetSettings onBake={() => setBaking(true)} /> : p === 'display' ? <DisplaySettings /> : p === 'layers' ? <Layers /> : p === 'properties' ? <Properties /> : <Shelf />;
@@ -218,7 +221,8 @@ export function App() {
         <Start />
       )}
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
-      {baking && currentSet() && <BakeDialog onClose={() => setBaking(false)} />}
+      {baking && currentSet() && <BakeDialog draft={draft} onClose={() => (setBaking(false), setDraft(null))} />}
+      {lightEdit && <LightPanel onDone={() => (setDraft(lightEdit), set({ lightEdit: null, lightSel: null }), setBaking(true))} />}
       <Toast message={toastMsg?.text ?? null} nonce={toastMsg?.n ?? 0} />
     </div>
   );

@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Button, Dialog, Field, Switch } from '@cocoasurface/ui';
 import { BEVEL_DEFAULTS, MESH_MAPS, TEXTURE_SIZES, type BakeSettings, type Bevel, type TextureSize } from '@cocoasurface/project';
-import { bake, dropHighPoly, loadHighPoly, measureCages, meshesOf, pairsOf, settingsOf } from '../baking';
+import { bake, dropHighPoly, loadHighPoly, measureCages, meshesOf, occluderNames, pairsOf, settingsOf } from '../baking';
 import { commit, currentSet, edit, live, set, useApp } from '../store';
 import { Chips, Range } from './controls';
 
 const pct = (v: number) => Math.round(v * 1000) / 10;
 
-export function BakeDialog({ onClose }: { onClose: () => void }) {
+export function BakeDialog({ onClose, draft }: { onClose: () => void; draft?: BakeSettings | null }) {
   const project = useApp((s) => s.project)!;
   const t = currentSet()!;
-  const [st, setSt] = useState<BakeSettings>(() => ({ ...settingsOf(t), useHigh: settingsOf(t).useHigh || !!project.highPoly }));
+  const [st, setSt] = useState<BakeSettings>(() => draft ?? { ...settingsOf(t), useHigh: settingsOf(t).useHigh || !!project.highPoly });
   const [all, setAll] = useState(project.textureSets.length > 1);
   const put = <K extends keyof BakeSettings>(k: K, v: BakeSettings[K]) => setSt((x) => ({ ...x, [k]: v }));
   const bevel = project.bevel ?? null;
@@ -18,6 +18,8 @@ export function BakeDialog({ onClose }: { onClose: () => void }) {
   const meshes = meshesOf(t.id);
   const high = !!project.highPoly;
   const cage = useApp((s) => s.view.cage);
+  const occluders = occluderNames(st.useHigh && high);
+  const lights = project.bakeLights?.length ?? 0;
   useEffect(() => set({ cagePreview: st }), [st]);
   useEffect(() => () => set({ cagePreview: null }), []);
   const go = () => {
@@ -50,6 +52,35 @@ export function BakeDialog({ onClose }: { onClose: () => void }) {
               <Field label="Distance">
                 <Range value={st.aoDistance * 100} min={1} max={100} step={1} label="Occlusion distance, % of the model" onChange={(v) => put('aoDistance', v / 100)} onCommit={(v) => put('aoDistance', v / 100)} />
               </Field>
+            </>
+          )}
+          {st.maps.includes('occlusion') && occluders.length > 1 && (
+            <>
+              <div className="cs-sec">Casts occlusion</div>
+              <div className="cs-occ">
+                {occluders.map((n) => (
+                  <label key={n}>
+                    <Switch checked={!st.aoExclude?.includes(n)} onChange={(v) => put('aoExclude', v ? (st.aoExclude ?? []).filter((x) => x !== n) : [...(st.aoExclude ?? []), n])} label={`${n} casts occlusion`} />
+                    <span>{n}</span>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+          {(st.maps.includes('light') || st.maps.includes('occlusion')) && (
+            <>
+              <div className="cs-sec">
+                <span>Bake lights</span>
+                <Button size="sm" onClick={() => (set({ lightEdit: st }), onClose())}>
+                  {lights ? 'Edit lights…' : 'Place lights…'}
+                </Button>
+              </div>
+              {lights > 0 && st.maps.includes('occlusion') && (
+                <Field label="Light occlusion">
+                  <Range value={(st.lightMix ?? 0) * 100} min={0} max={100} step={1} label="How much the bake lights brighten occlusion, %" onChange={(v) => put('lightMix', v / 100)} onCommit={(v) => put('lightMix', v / 100)} />
+                </Field>
+              )}
+              <span className="cs-note">{lights ? `${lights} light${lights === 1 ? '' : 's'}. ` : ''}Lights bake into the Light map, and can brighten occlusion where they reach.</span>
             </>
           )}
           {st.maps.includes('curvature') && (

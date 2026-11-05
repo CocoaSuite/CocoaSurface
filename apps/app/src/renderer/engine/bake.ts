@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { BVHShaderGLSL, FloatVertexAttributeTexture, MeshBVH, MeshBVHUniformStruct } from 'three-mesh-bvh';
-import type { BakeSettings, Bevel, MeshMap } from '@cocoasurface/project';
+import type { BakeLight, BakeSettings, Bevel, MeshMap } from '@cocoasurface/project';
 import { BAKE_LAYER, type SetGPU } from './gpu';
 import type { LoadedModel } from './model';
 
@@ -331,7 +331,7 @@ uniform sampler2D u_offset;
 uniform sampler2D u_sp;
 uniform sampler2D u_sn;
 uniform sampler2D u_prev;
-uniform int u_mode;       // 1 normal, 3 position, 4 id, 5 occlusion, 6 thickness, 7 surface point, 8 surface normal
+uniform int u_mode;       // 1 normal, 3 position, 4 id, 5 occlusion, 6 thickness, 7 surface point, 8 surface normal, 9 light
 uniform int u_high;
 uniform float u_dist;
 uniform int u_samples;
@@ -342,6 +342,9 @@ uniform int u_bevel;
 uniform float u_bevelR;
 uniform int u_bevelN;
 uniform int u_bevelEdges; // 0 both, 1 convex, 2 concave
+uniform vec4 u_lights[8]; // position, radius
+uniform float u_lightStr[8];
+uniform int u_nLights;
 
 uint seed;
 float rnd() {
@@ -444,6 +447,24 @@ void main() {
     vec3 sn = texelFetch(u_sn, ivec2(gl_FragCoord.xy), 0).xyz;
     float sum = texelFetch(u_prev, ivec2(gl_FragCoord.xy), 0).r;
     float eps = .0015;
+    if (u_mode == 9) {
+      for (int i = 0; i < 64; i++) {
+        if (i >= u_samples) break;
+        int k = (i + int(u_seed)) % max(u_nLights, 1);
+        vec4 L = u_lights[k];
+        vec3 q = L.xyz + normalize(vec3(rnd(), rnd(), rnd()) * 2. - 1. + 1e-4) * L.w * pow(rnd(), 1. / 3.);
+        vec3 to = q - sp;
+        float dist = length(to);
+        vec3 l = to / max(dist, 1e-6);
+        float ndl = dot(sn, l);
+        if (ndl <= 0.) continue;
+        vec3 hn; float d;
+        if (traceAll(sp + sn * eps, l, hn, d) && d < dist) continue;
+        sum += float(u_nLights) * u_lightStr[k] * ndl;
+      }
+      o = vec4(vec3(sum), 1.);
+      return;
+    }
     bool ao = u_mode == 5;
     vec3 side = ao ? sn : -sn;
     for (int i = 0; i < 64; i++) {
@@ -532,6 +553,20 @@ void main() {
 }`;
 
 /** Down to the map's size (averaging the samples inside the UV islands), padded past the island edges. */
+/** Occlusion brightened where the bake lights reach. */
+const LIGHT_MIX_FS = /* glsl */ `
+precision highp float;
+in vec2 vUv;
+out vec4 o;
+uniform sampler2D u_a;
+uniform sampler2D u_b;
+uniform float u_div;
+uniform float u_mix;
+void main() {
+  float ao = texture(u_a, vUv).r / u_div, l = clamp(texture(u_b, vUv).r / u_div, 0., 1.);
+  o = vec4(vec3(1. - (1. - ao) * (1. - u_mix * l)), 1.);
+}`;
+
 const ENCODE_FS = /* glsl */ `
 precision highp float;
 in vec2 vUv;
@@ -587,8 +622,10 @@ export interface BakeProgress {
 }
 
 export interface BakeSources {
-  /** What occlusion, thickness and bevel see. */
+  /** What thickness and bevel see. */
   all: BakeSource;
+  /** What occlusion and bake lights see: everything but the meshes left out of occlusion. */
+  occ: BakeSource;
   /** What a low-poly part projects onto. */
   own(part: number): BakeSource;
 }
@@ -607,6 +644,7 @@ export async function bakeSet(
   high: boolean,
   st: BakeSettings,
   bevel: Bevel | null,
+  lights: BakeLight[],
   progress: (p: BakeProgress) => void,
   cancelled: () => boolean,
 ): Promise<boolean> {
@@ -664,6 +702,16 @@ export async function bakeSet(
       u_bevelR: { value: (bevel?.radius ?? 0) * diag },
       u_bevelN: { value: bevel?.samples ?? 0 },
       u_bevelEdges: { value: bevel ? ['both', 'convex', 'concave'].indexOf(bevel.edges) : 0 },
+      u_lights: { value: Array.from({ length: 8 }, (_, i) => (lights[i] ? new THREE.Vector4(...lights[i].position, lights[i].radius * diag) : new THREE.Vector4())) },
+      u_lightStr: { value: Array.from({ length: 8 }, (_, i) => lights[i]?.strength ?? 0) },
+      u_nLights: { value: Math.min(8, lights.length) },
+  };
+  const occ = src.occ.bvh as unknown as typeof all;
+  const bindAll = (b: typeof all) => {
+    uniforms.u_allPos!.value = b.position;
+    uniforms.u_allIdx!.value = b.index;
+    uniforms.u_allBounds!.value = b.bvhBounds;
+    uniforms.u_allContents!.value = b.bvhContents;
   };
   // Two programs, so neither needs more texture units than graphics cards have.
   const stage = (n: number) => new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: VS, fragmentShader: FS, side: THREE.DoubleSide, depthTest: false, depthWrite: false, uniforms, defines: { STAGE: n } });
@@ -687,6 +735,9 @@ export async function bakeSet(
   const rayPasses = Math.max(1, Math.ceil(st.aoSamples / (ss * ss) / PER_PASS));
   for (const [m, mode] of [['occlusion', 5], ['thickness', 6]] as const)
     if (want.has(m)) for (let i = 0; i < rayPasses; i++) passes.push({ out: m, mode, seed: i + 1 });
+  const mix = want.has('occlusion') && lights.length ? (st.lightMix ?? 0) : 0;
+  const lit = lights.length > 0 && (want.has('light') || mix > 0);
+  if (lit) for (let i = 0; i < rayPasses; i++) passes.push({ out: 'light', mode: 9, seed: i + 1 });
   const total = passes.length + 1;
   const sync = new Float32Array(4);
   let last = performance.now();
@@ -700,6 +751,7 @@ export async function bakeSet(
   const quad = (fs: string, u: Record<string, THREE.IUniform>) => new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: QUAD, fragmentShader: fs, uniforms: u, depthTest: false, depthWrite: false });
   const curve = quad(CURVE_FS, { u_n: { value: null }, u_p: { value: null }, u_island: { value: islandHi.texture }, u_px: { value: 1 / work }, u_scale: { value: 0.12 * diag } });
   const curveN = quad(CURVE_N_FS, { u_n: { value: null }, u_island: { value: islandHi.texture }, u_px: { value: ss / work }, u_scale: { value: 2.5 * st.curvatureStrength } });
+  const lightMix = quad(LIGHT_MIX_FS, { u_a: { value: null }, u_b: { value: null }, u_div: { value: 1 }, u_mix: { value: 0 } });
   const enc = quad(ENCODE_FS, { u_src: { value: null }, u_islandHi: { value: islandHi.texture }, u_island: { value: island.texture }, u_px: { value: 1 / size }, u_div: { value: 1 }, u_ss: { value: ss }, u_kind: { value: 0 } });
   try {
     // Build every program before the heavy drawing starts.
@@ -727,6 +779,7 @@ export async function bakeSet(
         clearTo(t);
       }
       mat.uniforms.u_mode!.value = ps.mode;
+      bindAll(ps.mode === 5 || ps.mode === 9 ? occ : all);
       mat.uniforms.u_seed!.value = ps.seed;
       mat.uniforms.u_sp!.value = raw.get('sp')?.texture ?? null;
       mat.uniforms.u_sn!.value = raw.get('sn')?.texture ?? null;
@@ -743,7 +796,7 @@ export async function bakeSet(
           mat.uniforms.bvh!.value = own.bvh;
           mat.uniforms.u_normals!.value = own.normals;
           mat.uniforms.u_ids!.value = st.idFrom === 'mesh' ? own.idMesh : own.idSlot;
-          g.drawWith(stages[ps.mode === 8 && bevel ? 2 : ps.mode === 4 || ps.mode >= 7 ? 0 : ps.mode >= 5 ? 3 : 1], t, grp.length === 1 ? grp[0] : undefined);
+          g.drawWith(stages[ps.mode === 8 && bevel ? 2 : ps.mode === 9 ? 3 : ps.mode === 4 || ps.mode >= 7 ? 0 : ps.mode >= 5 ? 3 : 1], t, grp.length === 1 ? grp[0] : undefined);
         }
         r.readRenderTargetPixels(t, 0, y, 1, 1, sync);
         const ms = performance.now() - t0;
@@ -772,11 +825,21 @@ export async function bakeSet(
       raw.set('curvature', t);
     }
     if (want.has('worldNormal')) raw.set('worldNormal', raw.get('sn')!);
+    const div = rayPasses * PER_PASS;
+    if (mix > 0 && raw.get('occlusion') && raw.get('light')) {
+      const t = float();
+      lightMix.uniforms.u_a!.value = raw.get('occlusion')!.texture;
+      lightMix.uniforms.u_b!.value = raw.get('light')!.texture;
+      lightMix.uniforms.u_div!.value = div;
+      lightMix.uniforms.u_mix!.value = mix;
+      g.p.run(lightMix, t);
+      raw.set('occlusion', t);
+    }
     for (const m of st.maps) {
       const s = raw.get(m);
       if (!s) continue;
       enc.uniforms.u_src!.value = s.texture;
-      enc.uniforms.u_div!.value = m === 'occlusion' || m === 'thickness' ? rayPasses * PER_PASS : 1;
+      enc.uniforms.u_div!.value = (m === 'occlusion' && mix === 0) || m === 'thickness' || m === 'light' ? div : 1;
       enc.uniforms.u_kind!.value = m === 'worldNormal' ? 1 : 0;
       g.setBaked(m as MeshMap, (out) => g.p.run(enc, out), size);
     }
@@ -791,6 +854,7 @@ export async function bakeSet(
     stages.forEach((m) => m.dispose());
     curve.dispose();
     curveN.dispose();
+    lightMix.dispose();
     enc.dispose();
     zero.dispose();
     half.dispose();

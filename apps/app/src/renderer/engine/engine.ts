@@ -324,7 +324,7 @@ class Engine {
 }
 
 export const engine = new Engine();
-if (new URLSearchParams(location.search).has('inspect')) (window as unknown as { surface: unknown }).surface = { engine, get, assets: ASSETS };
+if (new URLSearchParams(location.search).has('inspect')) (window as unknown as { surface: unknown }).surface = { engine, get, set: useApp.setState, assets: ASSETS };
 
 useApp.subscribe((s, prev) => {
   if (s.project !== prev.project) engine.syncSets(s.project);

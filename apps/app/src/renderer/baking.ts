@@ -8,7 +8,7 @@ import { get, set, toast } from './store';
 
 let cache: { of: unknown[]; map: Map<string, BakeSource | null> } = { of: [], map: new Map() };
 
-function sourcesFor(useHigh: boolean, match: boolean): BakeSources {
+function sourcesFor(useHigh: boolean, match: boolean, exclude: string[] = []): BakeSources {
   if (cache.of[0] !== engine.model || cache.of[1] !== engine.high) {
     for (const s of cache.map.values()) if (s) disposeSource(s);
     cache = { of: [engine.model, engine.high], map: new Map() };
@@ -19,8 +19,11 @@ function sourcesFor(useHigh: boolean, match: boolean): BakeSources {
     return cache.map.get(key) ?? null;
   };
   const all = get(`${useHigh}:all`, () => bakeSource(from))!;
+  const ex = exclude.filter((n) => from.parts.some((_, i) => partName(from, i) === n)).sort();
+  const occ = ex.length && ex.length < from.parts.length ? get(`${useHigh}:occ:${ex.join('|')}`, () => bakeSource(from, (i) => !ex.includes(partName(from, i))))! : all;
   return {
     all,
+    occ,
     own: (part) => {
       if (!useHigh || !match) return all;
       const k = stem(partName(low, part));
@@ -88,15 +91,16 @@ export async function bake(ids: string[], st: BakeSettings): Promise<void> {
   await new Promise((r) => setTimeout(r, 30));
   let finished = 0;
   try {
-    const src = sourcesFor(useHigh, st.matchByName);
+    const src = sourcesFor(useHigh, st.matchByName, st.aoExclude);
     const bevel = get().project?.bevel ?? null;
+    const lights = get().project?.bakeLights ?? [];
     for (const [i, id] of ids.entries()) {
       const g = engine.sets.get(id);
       const t = get().project?.textureSets.find((x) => x.id === id);
       if (!g || !t) continue;
       g.ensure();
       const run = { ...st, cages: useHigh && st.autoCage ? measureCages(id, st) : st.cages };
-      const ok = await bakeSet(g, engine.model, src, useHigh, run, bevel, (p) => set((s) => ({ job: s.job && { ...s.job, label: `Baking ${t.name}`, share: (i + p.done / p.total) / ids.length } })), () => stop);
+      const ok = await bakeSet(g, engine.model, src, useHigh, run, bevel, lights, (p) => set((s) => ({ job: s.job && { ...s.job, label: `Baking ${t.name}`, share: (i + p.done / p.total) / ids.length } })), () => stop);
       if (!ok) break;
       finished++;
       set((s) => ({
@@ -138,4 +142,10 @@ export function cageGeometry(setId: string, st: BakeSettings): THREE.BufferGeome
     if (src.index) g.setIndex(src.index);
     return g;
   });
+}
+
+/** Names of the meshes occlusion is cast against: the high-poly's when baking from it, else the model's. */
+export function occluderNames(useHigh: boolean): string[] {
+  const from = useHigh && engine.high ? engine.high : engine.model;
+  return from ? from.parts.map((_, i) => partName(from, i)) : [];
 }

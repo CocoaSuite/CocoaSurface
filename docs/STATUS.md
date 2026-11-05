@@ -15,6 +15,11 @@ Laid out like Substance Painter: menu bar, tool options bar, toolbar on the left
 - Groups take effects: they run on what the group's layers make.
 - Export presets (CocoaWorlds, glTF / Blender, Unreal, Unity URP, Godot), packing (separate, ORM, Unity metal-smoothness) and per-map ticks (`export.skip`).
 
+## Bake lights and occlusion casters
+
+- The Bake dialog lists the meshes occlusion is cast against (the high-poly's when baking from it); untick one and it no longer darkens anything (`aoExclude`, a separate BVH in `baking.ts`). Bake lights use the same set.
+- Bake lights (`project.bakeLights`: position in model space, size, strength) are placed from the Bake dialog: the viewport shows the model in grey with shadowed point lights and a draggable handle per light (`Viewport.showLights`, `ui/LightPanel.tsx`), and "Back to baking" reopens the dialog with its settings. They bake into the Light map (mode 9: soft-shadowed visibility times N·L, summed over lights) and can brighten occlusion (`lightMix`: `1 - (1 - ao)(1 - mix·light)`). "Lit by bake lights" is a smart mask source.
+
 ## Not yet
 
 - Projection and clone tools, 2D view.

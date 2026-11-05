@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { findLayer, type Channel } from '@cocoasurface/project';
-import { currentLayer, currentSet, get, push, toast, useApp } from '../store';
+import { commit, currentLayer, currentSet, get, live, push, set as setState, toast, useApp } from '../store';
 import { engine } from './engine';
 import { cageGeometry, settingsOf } from '../baking';
 import { BAKE_LAYER, hexRgb, type Key, type StrokeOptions, type Tip } from './gpu';
@@ -34,6 +34,9 @@ export class Viewport {
   private stroke: { set: string; opts: StrokeOptions; last: THREE.Vector2; lazy: THREE.Vector2; carry: number; pressure: number; uv: THREE.Vector2 | null } | null = null;
   private ray = new THREE.Raycaster();
   private queued: THREE.Vector4[] = [];
+  private lights = new THREE.Group();
+  private preview = new THREE.MeshStandardMaterial({ color: 0xbdbdbd, roughness: 0.85 });
+  private bulbDrag: { id: string; plane: THREE.Plane; moved: boolean } | null = null;
   private stencilDrag: { b: number; x: number; y: number; st: import('../store').Stencil } | null = null;
   private adjust: { b: number; x: number; y: number; brush: import('../store').Brush } | null = null;
   private lastEnd: THREE.Vector2 | null = null;
@@ -52,7 +55,8 @@ export class Viewport {
     this.envTex = this.pm.fromScene(new RoomEnvironment(), 0.04).texture;
     this.envs.set('studio', { light: this.envTex, sky: null });
     this.scene.environment = this.envTex;
-    this.scene.add(this.grid, this.wire, this.cage, this.fill);
+    this.scene.add(this.grid, this.wire, this.cage, this.fill, this.lights);
+    this.r.shadowMap.type = THREE.PCFSoftShadowMap;
     this.grid.position.y = -1;
     this.persp.position.set(0, 0.3, 3.4);
     this.ortho.position.copy(this.persp.position);
@@ -72,6 +76,10 @@ export class Viewport {
     this.unsub = useApp.subscribe((s, p) => {
       if (s.view !== p.view || s.project !== p.project || s.setId !== p.setId) this.applyView();
       if (s.view.cage !== p.view.cage || s.cagePreview !== p.cagePreview || s.project !== p.project || s.setId !== p.setId) this.showCage();
+      if (s.lightEdit !== p.lightEdit || s.lightSel !== p.lightSel || s.project?.bakeLights !== p.project?.bakeLights) {
+        if (!!s.lightEdit !== !!p.lightEdit) this.applyView();
+        this.showLights();
+      }
       if (s.brush.size !== p.brush.size) this.cursor.style.width = this.cursor.style.height = `${s.brush.size}px`;
     });
     this.resize();
@@ -188,8 +196,18 @@ export class Viewport {
       this.wire.clear();
       this.wireOf = null;
     }
+    const lit = !!s.lightEdit;
+    if (lit) {
+      this.scene.environmentIntensity = 0.12;
+      this.fill.intensity = 0.15;
+    }
     if (m && s.project) {
       for (const part of m.parts) {
+        part.mesh.castShadow = part.mesh.receiveShadow = lit;
+        if (lit) {
+          part.mesh.material = this.preview;
+          continue;
+        }
         part.mesh.material = part.slots.map((slot) => {
           const t = s.project!.textureSets.find((x) => x.slots.includes(slot));
           if (!t) return new THREE.MeshStandardMaterial({ color: 0x555555 });
@@ -230,6 +248,40 @@ export class Viewport {
       this.applyView();
     });
     return null;
+  }
+
+  private modelSize(): number {
+    return engine.model ? new THREE.Box3().setFromObject(engine.model.root).getSize(new THREE.Vector3()).length() || 1 : 1;
+  }
+
+  /** Bake lights while they're being placed: a handle for each, and a light with shadows for the preview. */
+  showLights(): void {
+    for (const c of [...this.lights.children]) {
+      if (c instanceof THREE.Mesh) (c.geometry.dispose(), (c.material as THREE.Material).dispose());
+      if (c instanceof THREE.PointLight) c.shadow.map?.dispose();
+    }
+    this.lights.clear();
+    const s = get();
+    this.r.shadowMap.enabled = !!s.lightEdit;
+    if (s.lightEdit) this.cursor.style.display = 'none';
+    if (s.lightEdit) {
+      const diag = this.modelSize();
+      for (const l of s.project?.bakeLights ?? []) {
+        const on = l.id === s.lightSel;
+        const h = new THREE.Mesh(new THREE.SphereGeometry(Math.max(l.radius * diag, diag * 0.012), 20, 12), new THREE.MeshBasicMaterial({ color: on ? 0xffcd15 : 0xfff3c4, transparent: true, opacity: on ? 0.95 : 0.7, depthTest: false }));
+        h.renderOrder = 10;
+        h.position.set(...l.position);
+        h.userData.light = l.id;
+        const pl = new THREE.PointLight(0xffffff, l.strength * 3, 0, 0);
+        pl.position.set(...l.position);
+        pl.castShadow = true;
+        pl.shadow.mapSize.set(1024, 1024);
+        pl.shadow.bias = -0.002;
+        pl.shadow.radius = 2 + l.radius * 60;
+        this.lights.add(h, pl);
+      }
+    }
+    this.redraw();
   }
 
   /** The bake cage as a see-through shell with its wires. */
@@ -417,6 +469,17 @@ export class Viewport {
     el.addEventListener('pointermove', (e) => {
       const b = el.getBoundingClientRect();
       const sd = this.stencilDrag, ad = this.adjust, ld = this.lightDrag;
+      if (this.bulbDrag) {
+        const d = this.bulbDrag;
+        const at = this.screen(e);
+        this.ray.setFromCamera(new THREE.Vector2((at.x / el.width) * 2 - 1, (at.y / el.height) * 2 - 1), this.camera);
+        const p = this.ray.ray.intersectPlane(d.plane, new THREE.Vector3());
+        if (!p) return;
+        d.moved = true;
+        live((pr) => ({ ...pr, bakeLights: (pr.bakeLights ?? []).map((l) => (l.id === d.id ? { ...l, position: [p.x, p.y, p.z] } : l)) }));
+        return;
+      }
+      if (get().lightEdit) return;
       if (sd) {
         const dx = e.clientX - sd.x, dy = e.clientY - sd.y;
         const st = sd.b === 1 ? { x: sd.st.x + dx / b.width, y: sd.st.y + dy / b.height } : sd.b === 2 ? { scale: Math.max(0.02, Math.min(10, sd.st.scale * Math.exp(dx / 200))) } : { angle: (((sd.st.angle - dx * 0.5) % 360) + 360) % 360 };
@@ -440,6 +503,20 @@ export class Viewport {
     });
     el.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 || e.altKey) return;
+      if (get().lightEdit) {
+        const at = this.screen(e);
+        const w = el.width, h = el.height;
+        this.ray.setFromCamera(new THREE.Vector2((at.x / w) * 2 - 1, (at.y / h) * 2 - 1), this.camera);
+        const hit = this.ray.intersectObjects(this.lights.children.filter((c) => c.userData.light), false)[0];
+        if (!hit) return setState({ lightSel: null });
+        const id = hit.object.userData.light as string;
+        setState({ lightSel: id });
+        const n = this.camera.getWorldDirection(new THREE.Vector3());
+        this.bulbDrag = { id, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(n, hit.object.position), moved: false };
+        el.setPointerCapture(e.pointerId);
+        this.controls.enabled = false;
+        return;
+      }
       if (get().tool === 'picker') return this.pick(e);
       const t = this.strokeTarget();
       if (typeof t === 'string') return toast(t);
@@ -457,6 +534,12 @@ export class Viewport {
       this.paintTo(at, pr, true);
     });
     const end = () => {
+      if (this.bulbDrag) {
+        if (this.bulbDrag.moved) commit('Move bake light');
+        this.bulbDrag = null;
+        this.controls.enabled = true;
+        return;
+      }
       if (this.stencilDrag || this.adjust || this.lightDrag) {
         this.stencilDrag = this.adjust = this.lightDrag = null;
         this.controls.enabled = true;

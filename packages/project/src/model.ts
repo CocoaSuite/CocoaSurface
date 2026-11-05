@@ -47,7 +47,7 @@ export interface FlatValues {
 
 export const FLAT_DEFAULTS: FlatValues = { color: '#9a9a9a', roughness: 0.6, metalness: 0, height: 0.5, occlusion: 1, glow: '#000000', opacity: 1 };
 
-export type MeshMap = 'normal' | 'worldNormal' | 'position' | 'occlusion' | 'curvature' | 'thickness' | 'id';
+export type MeshMap = 'normal' | 'worldNormal' | 'position' | 'occlusion' | 'curvature' | 'thickness' | 'id' | 'light';
 
 export const MESH_MAPS: { id: MeshMap; label: string }[] = [
   { id: 'normal', label: 'Normal' },
@@ -57,6 +57,7 @@ export const MESH_MAPS: { id: MeshMap; label: string }[] = [
   { id: 'curvature', label: 'Curvature' },
   { id: 'thickness', label: 'Thickness' },
   { id: 'id', label: 'ID' },
+  { id: 'light', label: 'Light' },
 ];
 
 export interface BakeSettings {
@@ -86,6 +87,20 @@ export interface BakeSettings {
   /** Curvature from the mesh's shape, or from the baked normal map (picks up high-poly detail). */
   curvatureFrom: 'mesh' | 'normal';
   curvatureStrength: number;
+  /** High-poly (or low-poly) meshes, by name, that don't darken anything in occlusion. */
+  aoExclude?: string[];
+  /** How much the bake lights brighten the occlusion map, 0 to 1. */
+  lightMix?: number;
+}
+
+/** A light placed for baking: lights the Light map, and can brighten occlusion. */
+export interface BakeLight {
+  id: string;
+  /** In the model's space. */
+  position: [number, number, number];
+  /** Size, as a share of the model's size: bigger gives softer shadows. */
+  radius: number;
+  strength: number;
 }
 
 /** Rounds hard edges in the baked maps, as if they were bevelled, by blending normals of nearby surfaces. */
@@ -102,7 +117,7 @@ export const BAKE_DEFAULTS: BakeSettings = { size: 2048, maps: ['normal', 'world
 
 /** A mask made from a baked mesh map: edges, cavities, thin parts, height or up-facing surfaces. */
 export interface Generator {
-  source: 'curvature' | 'occlusion' | 'thickness' | 'height' | 'up';
+  source: 'curvature' | 'occlusion' | 'thickness' | 'height' | 'up' | 'light';
   level: number;
   spread: number;
   invert: boolean;
@@ -125,6 +140,7 @@ export const GENERATOR_SOURCES: { value: Generator['source']; label: string; map
   { value: 'thickness', label: 'Thin parts (thickness)', map: 'thickness' },
   { value: 'height', label: 'Height on the model', map: 'position' },
   { value: 'up', label: 'Facing up', map: 'worldNormal' },
+  { value: 'light', label: 'Lit by bake lights', map: 'light' },
 ];
 
 /** A library material used by a fill layer, with this layer's own parameter values. */
@@ -336,6 +352,7 @@ export interface Project {
   textureSets: TextureSet[];
   library: LibraryMaterial[];
   assets?: ProjectAsset[];
+  bakeLights?: BakeLight[];
   export: ExportSettings;
   extensions?: Record<string, unknown>;
 }
