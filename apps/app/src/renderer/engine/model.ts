@@ -1,3 +1,4 @@
+import * as MikkTSpace from 'mikktspace';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -43,7 +44,7 @@ async function parse(ext: string, bytes: Uint8Array): Promise<THREE.Object3D> {
   throw new Error(`CocoaSurface can't open .${ext} files.`);
 }
 
-export async function loadModel(name: string, bytes: Uint8Array, fit?: LoadedModel['fit']): Promise<LoadedModel> {
+export async function loadModel(name: string, bytes: Uint8Array, fit?: LoadedModel['fit'], tangents = !fit): Promise<LoadedModel> {
   const ext = name.split('.').pop()!.toLowerCase();
   let src: THREE.Object3D;
   try {
@@ -88,6 +89,7 @@ export async function loadModel(name: string, bytes: Uint8Array, fit?: LoadedMod
     if (!g.getAttribute('uv')) warnings.push(`“${src.name || 'A mesh'}” has no texture coordinates (UVs) and can't be painted.`);
     if (!g.groups.length) g.addGroup(0, g.index ? g.index.count : g.getAttribute('position').count, 0);
     triangles += (g.index ? g.index.count : g.getAttribute('position').count) / 3;
+    if (tangents) g = withTangents(g);
     markIslands(g);
     const mesh = new THREE.Mesh(g, []);
     mesh.name = src.name;
@@ -106,6 +108,43 @@ export async function loadModel(name: string, bytes: Uint8Array, fit?: LoadedMod
     p.mesh.geometry.computeBoundingBox();
   }
   return { name, root, parts, slots, vUp: ext !== 'glb' && ext !== 'gltf', warnings, triangles, fit: { centre, scale: s } };
+}
+
+/**
+ * MikkTSpace tangents, the frame Blender, Unreal, Unity and most bakers read normal maps in. Shared corners that
+ * need different tangents (mirrored or split UVs) get their own vertices.
+ */
+function withTangents(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  if (!g.getAttribute('uv') || !g.getAttribute('normal')) return g;
+  const flat = g.index ? g.toNonIndexed() : g;
+  const arr = (a: THREE.BufferAttribute | THREE.InterleavedBufferAttribute) => {
+    const o = new Float32Array(a.count * a.itemSize);
+    for (let i = 0; i < a.count; i++) for (let k = 0; k < a.itemSize; k++) o[i * a.itemSize + k] = a.getComponent(i, k);
+    return o;
+  };
+  const t = MikkTSpace.generateTangents(arr(flat.getAttribute('position')), arr(flat.getAttribute('normal')), arr(flat.getAttribute('uv')));
+  const idx = g.index;
+  if (idx) {
+    const n = g.getAttribute('position').count;
+    const out = new Float32Array(n * 4);
+    const seen = new Uint8Array(n);
+    let same = true;
+    for (let c = 0; c < idx.count && same; c++) {
+      const v = idx.getX(c);
+      if (!seen[v]) {
+        seen[v] = 1;
+        out.set(t.subarray(c * 4, c * 4 + 4), v * 4);
+      } else {
+        same = out[v * 4 + 3] === t[c * 4 + 3] && out[v * 4]! * t[c * 4]! + out[v * 4 + 1]! * t[c * 4 + 1]! + out[v * 4 + 2]! * t[c * 4 + 2]! > 0.9999;
+      }
+    }
+    if (same) {
+      g.setAttribute('tangent', new THREE.BufferAttribute(out, 4));
+      return g;
+    }
+  }
+  flat.setAttribute('tangent', new THREE.BufferAttribute(t, 4));
+  return flat;
 }
 
 /** Number each UV island (triangles joined through shared texture coordinates) in an `a_island` attribute. */

@@ -250,6 +250,8 @@ export function autoCage(low: LoadedModel, part: number, src: BakeSource, diag: 
 }
 
 const VS = /* glsl */ `
+in vec4 tangent;
+out vec4 vTan;
 in vec2 cage;
 in vec3 cageDir;
 in vec3 triA;
@@ -273,6 +275,7 @@ void main() {
   vWorld = w.xyz;
   vN = normalize(transpose(inverse(mat3(modelMatrix))) * normal);
   vUv = uv;
+  vTan = vec4(mat3(modelMatrix) * tangent.xyz, tangent.w);
   vCage = cage;
   vPos = position;
   vA = triA; vB = triB; vC = triC; vSE = splitE; vSV = splitV;
@@ -290,6 +293,7 @@ ${BVHShaderGLSL.common_functions}
 ${BVHShaderGLSL.bvh_ray_functions}
 in vec3 vWorld;
 in vec3 vN;
+in vec4 vTan;
 in vec2 vUv;
 in vec2 vCage;
 in vec3 vPos;
@@ -454,10 +458,16 @@ void main() {
 
 #if STAGE == 2
   if (u_mode == 1) {
-    // Tangent space as the viewer builds it from the texture coordinates (cotangent frame).
-    vec3 T = cross(q1, N), B = cross(N, q0);
-    float s = inversesqrt(max(dot(T, T), dot(B, B)));
-    mat3 tbn = mat3(T * s, B * s, N);
+    // MikkTSpace, as the model's tangents carry it; the frame from the texture coordinates if there are none.
+    mat3 tbn;
+    if (dot(vTan.xyz, vTan.xyz) > 1e-12) {
+      vec3 T = normalize(vTan.xyz);
+      tbn = mat3(T, (vTan.w < 0. ? -1. : 1.) * cross(N, T), N);
+    } else {
+      vec3 T = cross(q1, N), B = cross(N, q0);
+      float s = inversesqrt(max(dot(T, T), dot(B, B)));
+      tbn = mat3(T * s, B * s, N);
+    }
     vec3 sn = texelFetch(u_sn, ivec2(gl_FragCoord.xy), 0).xyz;
     o = vec4(normalize(inverse(tbn) * sn) * .5 + .5, 1.);
     return;
