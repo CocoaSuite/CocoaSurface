@@ -819,7 +819,9 @@ export async function bakeSet(
   const total = passes.length + 1;
   const sync = new Float32Array(4);
   let last = performance.now();
-  let band = Math.max(8, Math.round(65536 / work));
+  // Each kind of pass learns its own band height, so a slow pass never starts at a cheap one's size.
+  const bands = new Map<number, number>();
+  const start = Math.max(8, Math.round(65536 / work));
   const auto = r.autoClear, prev = r.getRenderTarget();
   const clearTo = (t: THREE.WebGLRenderTarget) => {
     r.setRenderTarget(t);
@@ -863,6 +865,8 @@ export async function bakeSet(
       mat.uniforms.u_sp!.value = raw.get('sp')?.texture ?? null;
       mat.uniforms.u_sn!.value = raw.get('sn')?.texture ?? null;
       r.autoClear = false;
+      const kind = ps.mode * 2 + (ps.mode === 8 && bevel ? 1 : 0);
+      let band = bands.get(kind) ?? start;
       // Full-width bands whose height follows how long the last one took.
       for (let y = 0; y < work; ) {
         if (cancelled()) return false;
@@ -881,7 +885,7 @@ export async function bakeSet(
         const ms = performance.now() - t0;
         y += h;
         if (ms < BAND_MS / 2) band = Math.min(work, band * 2);
-        else if (ms > BAND_MS * 2) band = Math.max(8, band >> 1);
+        else if (ms > BAND_MS * 2) band = Math.max(8, Math.floor((band * BAND_MS) / ms));
         if (performance.now() - last > 120) {
           progress({ done: i + y / work, total });
           await new Promise((res) => requestAnimationFrame(res));
@@ -889,6 +893,7 @@ export async function bakeSet(
         }
       }
       t.scissorTest = false;
+      bands.set(kind, band);
       progress({ done: i + 1, total });
       // Show the map as it comes along: after each ray pass, or once it's done.
       const m = (ps.out === 'sn' ? 'worldNormal' : ps.out) as MeshMap;
