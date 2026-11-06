@@ -42,6 +42,9 @@ export class Viewport {
   private lastEnd: THREE.Vector2 | null = null;
   private sDown = false;
   private unsub: () => void;
+  private viewLights = new THREE.Group();
+  private viewLightsKey = '';
+  private shadowsOn = false;
   /** 2D view: the current texture set laid out flat. */
   readonly flatScene = new THREE.Scene();
   readonly flatCam = new THREE.OrthographicCamera(-1, 1, 1, -1, -10, 10);
@@ -63,7 +66,7 @@ export class Viewport {
     this.envTex = this.pm.fromScene(new RoomEnvironment(), 0.04).texture;
     this.envs.set('studio', { light: this.envTex, sky: null });
     this.scene.environment = this.envTex;
-    this.scene.add(this.grid, this.wire, this.cage, this.fill, this.lights);
+    this.scene.add(this.grid, this.wire, this.cage, this.fill, this.lights, this.viewLights);
     this.r.shadowMap.type = THREE.PCFSoftShadowMap;
     this.grid.position.y = -1;
     this.persp.position.set(0, 0.3, 3.4);
@@ -245,13 +248,15 @@ export class Viewport {
       this.wireOf = null;
     }
     const lit = !!s.lightEdit;
+    const shade = this.showViewLights();
+    this.setShadows(lit || shade);
     if (lit) {
       this.scene.environmentIntensity = 0.12;
       this.fill.intensity = 0.15;
     }
     if (m && s.project) {
       for (const part of m.parts) {
-        part.mesh.castShadow = part.mesh.receiveShadow = lit;
+        part.mesh.castShadow = part.mesh.receiveShadow = lit || shade;
         if (lit) {
           part.mesh.material = this.preview;
           continue;
@@ -346,6 +351,76 @@ export class Viewport {
     sheet.material = engine.channelMaterial(t.id, mode);
   }
 
+  /** The lights added in Display Settings. Returns whether any casts shadows. */
+  private showViewLights(): boolean {
+    const s = get();
+    const m = engine.model;
+    const ls = s.lightEdit || !m ? [] : (s.view.lights ?? []).filter((l) => l.on);
+    const key = JSON.stringify([ls, m?.name, m?.parts.length]);
+    if (key !== this.viewLightsKey) {
+      this.viewLightsKey = key;
+      for (const c of [...this.viewLights.children]) {
+        if (c instanceof THREE.Mesh) (c.geometry.dispose(), (c.material as THREE.Material).dispose());
+        if (c instanceof THREE.Light) (c as THREE.PointLight).shadow?.map?.dispose();
+      }
+      this.viewLights.clear();
+      if (m) {
+        const box = new THREE.Box3().setFromObject(m.root);
+        const c = box.getCenter(new THREE.Vector3());
+        const R = box.getSize(new THREE.Vector3()).length() / 2 || 1;
+        for (const l of ls) {
+          const t = THREE.MathUtils.degToRad(l.turn), h = THREE.MathUtils.degToRad(l.height);
+          const dir = new THREE.Vector3(Math.cos(h) * Math.sin(t), Math.sin(h), Math.cos(h) * Math.cos(t));
+          const d = R * (l.kind === 'sun' ? 3 : l.distance);
+          const color = new THREE.Color(l.color);
+          const light =
+            l.kind === 'sun'
+              ? new THREE.DirectionalLight(color, l.strength)
+              : l.kind === 'point'
+                ? new THREE.PointLight(color, l.strength * d * d, 0, 2)
+                : new THREE.SpotLight(color, l.strength * d * d, 0, THREE.MathUtils.degToRad(l.cone), 0.3, 2);
+          light.position.copy(c).addScaledVector(dir, d);
+          if (light instanceof THREE.DirectionalLight || light instanceof THREE.SpotLight) {
+            light.target.position.copy(c);
+            this.viewLights.add(light.target);
+          }
+          light.castShadow = l.shadows;
+          light.shadow.mapSize.set(2048, 2048);
+          light.shadow.bias = -0.0005;
+          light.shadow.normalBias = R * 0.004;
+          if (light instanceof THREE.DirectionalLight) {
+            const sc = light.shadow.camera;
+            sc.left = sc.bottom = -R;
+            sc.right = sc.top = R;
+            sc.near = R * 0.5;
+            sc.far = R * 6;
+          } else {
+            light.shadow.camera.near = R * 0.02;
+            light.shadow.camera.far = d + R * 2;
+          }
+          this.viewLights.add(light);
+          if (l.kind !== 'sun') {
+            const bulb = new THREE.Mesh(new THREE.SphereGeometry(R * 0.02, 12, 8), new THREE.MeshBasicMaterial({ color, toneMapped: false }));
+            bulb.position.copy(light.position);
+            this.viewLights.add(bulb);
+          }
+        }
+      }
+    }
+    return ls.some((l) => l.shadows);
+  }
+
+  /** Materials are rebuilt when shadows are switched on or off. */
+  private setShadows(on: boolean): void {
+    this.r.shadowMap.enabled = on;
+    if (on === this.shadowsOn) return;
+    this.shadowsOn = on;
+    engine.model?.root.traverse((o) => {
+      const mat = (o as THREE.Mesh).material;
+      for (const x of Array.isArray(mat) ? mat : mat ? [mat] : []) x.needsUpdate = true;
+    });
+  }
+
   /** An environment's lighting and sky, loaded the first time it's used. */
   private environment(id: string): { light: THREE.Texture; sky: THREE.Texture | null; up?: THREE.Color; down?: THREE.Color } | null {
     const e = this.envs.get(id);
@@ -385,7 +460,7 @@ export class Viewport {
     }
     this.lights.clear();
     const s = get();
-    this.r.shadowMap.enabled = !!s.lightEdit;
+    this.setShadows(!!s.lightEdit || !!s.view.lights?.some((l) => l.on && l.shadows));
     if (s.lightEdit) this.cursor.style.display = 'none';
     if (s.lightEdit) {
       const diag = this.modelSize();

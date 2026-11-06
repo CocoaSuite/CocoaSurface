@@ -63,6 +63,24 @@ export interface View {
   env: Environment;
   /** Show the environment behind the model instead of the plain background. */
   showEnv: boolean;
+  /** Extra lights in the viewport, for previewing (not saved, not baked). */
+  lights?: ViewLight[];
+}
+
+export interface ViewLight {
+  id: string;
+  kind: 'sun' | 'point' | 'spot';
+  color: string;
+  strength: number;
+  /** Direction from the model's centre, in degrees. */
+  turn: number;
+  height: number;
+  /** Point and spot: distance from the centre, in model radii. */
+  distance: number;
+  /** Spot: cone angle in degrees. */
+  cone: number;
+  shadows: boolean;
+  on: boolean;
 }
 
 export type Environment = 'studio' | 'sunset' | 'day';

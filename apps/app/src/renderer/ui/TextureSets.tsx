@@ -1,8 +1,9 @@
 import { Field, Section } from '@cocoasurface/ui';
 import { CHANNELS, MESH_MAPS, TEXTURE_SIZES, type TextureSize } from '@cocoasurface/project';
-import { Button, Segmented, Switch } from '@cocoasurface/ui';
-import { commit, currentSet, editSet, ENVIRONMENTS, set, useApp, type Environment } from '../store';
-import { Chips, Range } from './controls';
+import { Button, IconButton, Segmented, Switch } from '@cocoasurface/ui';
+import { uid } from '@cocoasurface/project';
+import { commit, currentSet, editSet, ENVIRONMENTS, set, useApp, type Environment, type ViewLight } from '../store';
+import { Chips, Color, Range } from './controls';
 import { focusPanel } from './Dock';
 
 export function TextureSetList() {
@@ -98,6 +99,54 @@ export function TextureSetSettings({ onBake }: { onBake: () => void }) {
   );
 }
 
+const KINDS = [{ value: 'sun', label: 'Sun' }, { value: 'point', label: 'Point' }, { value: 'spot', label: 'Spot' }] as const;
+
+function ViewLights() {
+  const lights = useApp((s) => s.view.lights) ?? [];
+  const put = (f: (l: ViewLight[]) => ViewLight[]) => set((s) => ({ view: { ...s.view, lights: f(s.view.lights ?? []) } }));
+  const change = (id: string, v: Partial<ViewLight>) => put((ls) => ls.map((l) => (l.id === id ? { ...l, ...v } : l)));
+  const add = () => put((ls) => [...ls, { id: uid(), kind: 'sun', color: '#ffffff', strength: 2, turn: 45 + ls.length * 90, height: 40, distance: 2, cone: 35, shadows: true, on: true }]);
+  return (
+    <>
+      <Section title="Lights" action={<IconButton icon="plus" label="Add a light" onClick={add} />} />
+      {lights.map((l, i) => (
+        <div key={l.id} className="cs-vlight">
+          <div className="cs-vlight-head">
+            <Switch checked={l.on} label={`Light ${i + 1}`} onChange={(on) => change(l.id, { on })} />
+            <Segmented label="Kind" options={[...KINDS]} value={l.kind} onChange={(kind) => change(l.id, { kind })} />
+            <IconButton icon="trash" label="Remove" onClick={() => put((ls) => ls.filter((x) => x.id !== l.id))} />
+          </div>
+          <Field label="Color">
+            <Color value={l.color} label="Color" onChange={(color) => change(l.id, { color })} onCommit={() => {}} />
+          </Field>
+          <Field label="Strength">
+            <Range value={l.strength} min={0} max={10} label="Strength" onChange={(strength) => change(l.id, { strength })} onCommit={() => {}} />
+          </Field>
+          <Field label="Turn">
+            <Range value={l.turn} min={0} max={360} label="Turn" onChange={(turn) => change(l.id, { turn })} onCommit={() => {}} />
+          </Field>
+          <Field label="Height">
+            <Range value={l.height} min={-90} max={90} label="Height" onChange={(height) => change(l.id, { height })} onCommit={() => {}} />
+          </Field>
+          {l.kind !== 'sun' && (
+            <Field label="Distance">
+              <Range value={l.distance} min={0.5} max={8} label="Distance" onChange={(distance) => change(l.id, { distance })} onCommit={() => {}} />
+            </Field>
+          )}
+          {l.kind === 'spot' && (
+            <Field label="Cone">
+              <Range value={l.cone} min={5} max={85} label="Cone" onChange={(cone) => change(l.id, { cone })} onCommit={() => {}} />
+            </Field>
+          )}
+          <Field label="Shadows">
+            <Switch checked={l.shadows} label="Shadows" onChange={(shadows) => change(l.id, { shadows })} />
+          </Field>
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function DisplaySettings() {
   const view = useApp((s) => s.view);
   return (
@@ -121,6 +170,7 @@ export function DisplaySettings() {
           <Field label="Turn">
             <Range value={view.turn} min={0} max={360} label="Turn" onChange={(v) => set((s) => ({ view: { ...s.view, turn: v } }))} onCommit={() => {}} />
           </Field>
+          <ViewLights />
           <Section title="Camera" />
           <Field label="Projection">
             <Segmented label="Projection" options={[{ value: 'p', label: 'Perspective' }, { value: 'o', label: 'Orthographic' }]} value={view.ortho ? 'o' : 'p'} onChange={(v) => set((s) => ({ view: { ...s.view, ortho: v === 'o' } }))} />

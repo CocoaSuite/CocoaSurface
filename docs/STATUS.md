@@ -22,6 +22,10 @@ Bake mesh maps sits at the right end of the tool options bar. Occlusion, thickne
 
 The Bake panel sits over the left dock (not modal), so the viewport and cage stay in view; closing it turns the cage display off. While baking, the viewport shows each map as it's made (`shown` callback from `bakeSet`; ray maps refine pass by pass), then goes back to the view it had.
 
+## Viewport lights
+
+Display Settings > Lights adds preview lights (sun, point, spot) with color, strength, turn and height around the model, distance, cone and shadows (`view.lights`, `Viewport.showViewLights`). They are display settings like the environment: not saved in the project and not baked.
+
 ## 2D view
 
 The 3D/2D switch in the viewport (and Viewport > 2D view) shows the current texture set laid out flat, with its UV wires, in whatever the Show list picks (Material shows color). Pan with middle drag or Alt + left, zoom with the wheel or Alt + right; Fit to screen resets it. Brushes, erase, smudge, blur, fill and the picker work there too: the dab shader takes `u_flat` and projects the texel's UV instead of its surface point, with no depth or facing test (`flatScene`, `flatCam`, `flatNav` in `viewport.ts`). Symmetry is off in 2D; placing bake lights switches back to 3D.
