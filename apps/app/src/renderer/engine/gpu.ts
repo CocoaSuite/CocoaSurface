@@ -64,7 +64,7 @@ export class Passes {
   readonly dab = shader(
     DAB_FS,
     {
-      u_viewProj: { value: new THREE.Matrix4() }, u_camPos: { value: new THREE.Vector3() }, u_camDir: { value: new THREE.Vector3() }, u_ortho: { value: 0 },
+      u_flat: { value: 0 }, u_flipV: { value: 0 }, u_viewProj: { value: new THREE.Matrix4() }, u_camPos: { value: new THREE.Vector3() }, u_camDir: { value: new THREE.Vector3() }, u_ortho: { value: 0 },
       u_screen: { value: new THREE.Vector2() }, u_depth: { value: null }, u_dabs: { value: Array.from({ length: MAX_DABS }, () => new THREE.Vector4()) },
       u_count: { value: 0 }, u_hardness: { value: 0.5 }, u_flow: { value: 1 }, u_shape: { value: 0 }, u_angle: { value: 0 }, u_alpha: { value: null },
       u_hasStencil: { value: 0 }, u_stencil: { value: null }, u_stencilAt: { value: new THREE.Vector4() }, u_stencilAspect: { value: 1 },
@@ -336,6 +336,8 @@ export class SetGPU {
     camera.getWorldPosition(u.u_camPos!.value);
     camera.getWorldDirection(u.u_camDir!.value);
     u.u_ortho!.value = (camera as THREE.OrthographicCamera).isOrthographicCamera ? 1 : 0;
+    u.u_flat!.value = camera.userData.flat ? 1 : 0;
+    u.u_flipV!.value = this.vUp ? 0 : 1;
     (u.u_screen!.value as THREE.Vector2).copy(screen);
     u.u_depth!.value = this.p.depth!.texture;
     u.u_hardness!.value = Math.min(0.999, tip.hardness);

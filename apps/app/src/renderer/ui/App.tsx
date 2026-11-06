@@ -174,6 +174,7 @@ export function App() {
         ...CHANNELS.map((c) => ({ label: c.label, onSelect: () => set((s) => ({ view: { ...s.view, mode: c.id } })) })),
         ...(currentSet()?.bake?.done ?? []).map((m) => ({ label: `Mesh map: ${MESH_MAPS.find((x) => x.id === m)!.label}`, onSelect: () => set((s) => ({ view: { ...s.view, mode: `mesh:${m}` as const } })) })),
         'separator',
+        { label: get().view.flat ? '3D view' : '2D view', onSelect: () => set((s) => ({ view: { ...s.view, flat: !s.view.flat } })) },
         ...(['front', 'back', 'left', 'right', 'top', 'bottom'] as CameraView[]).map((v) => ({ label: `Camera: ${v[0]!.toUpperCase()}${v.slice(1)}`, onSelect: () => viewport()?.look(v) })),
         { label: 'Fit to screen', onSelect: () => viewport()?.frame() },
         'separator',

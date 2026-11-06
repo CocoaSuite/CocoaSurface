@@ -52,6 +52,8 @@ export interface View {
   mode: ViewMode;
   wire: boolean;
   ortho: boolean;
+  /** Show the texture laid out flat instead of the model. */
+  flat: boolean;
   grid: boolean;
   light: number;
   turn: number;
@@ -122,7 +124,7 @@ export const useApp = create<State>(() => ({
   cagePreview: null,
   lightEdit: null,
   lightSel: null,
-  view: { mode: 'material', wire: false, ortho: false, grid: true, light: 1, turn: 0, cage: false, env: 'studio', showEnv: false },
+  view: { mode: 'material', wire: false, ortho: false, flat: false, grid: true, light: 1, turn: 0, cage: false, env: 'studio', showEnv: false },
   materials: {},
   warnings: [],
   toast: null,

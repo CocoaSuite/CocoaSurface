@@ -270,10 +270,12 @@ void main() {
 export const UV_VS = /* glsl */ `
 out vec3 vWorld;
 out vec3 vN;
+out vec2 vTex;
 void main() {
   vec4 w = modelMatrix * vec4(position, 1.);
   vWorld = w.xyz;
   vN = normalize(transpose(inverse(mat3(modelMatrix))) * normal);
+  vTex = uv;
   gl_Position = vec4(uv * 2. - 1., 0., 1.);
 }`;
 
@@ -289,7 +291,10 @@ export const DAB_FS = /* glsl */ `
 precision highp float;
 in vec3 vWorld;
 in vec3 vN;
+in vec2 vTex;
 out vec4 o;
+uniform int u_flat;      // 1: the brush works on the texture laid out flat (2D view)
+uniform int u_flipV;
 uniform mat4 u_viewProj;
 uniform vec3 u_camPos;
 uniform vec3 u_camDir;
@@ -318,16 +323,20 @@ float tip(vec2 d) {
 }
 
 void main() {
-  vec4 clip = u_viewProj * vec4(vWorld, 1.);
+  vec3 at = u_flat == 1 ? vec3(vTex.x, u_flipV == 1 ? 1. - vTex.y : vTex.y, 0.) : vWorld;
+  vec4 clip = u_viewProj * vec4(at, 1.);
   if (clip.w <= 0.) discard;
   vec3 ndc = clip.xyz / clip.w;
   vec2 sc = (ndc.xy * .5 + .5);
   if (any(lessThan(sc, vec2(0.))) || any(greaterThan(sc, vec2(1.)))) discard;
-  vec3 view = u_ortho == 1 ? -u_camDir : normalize(u_camPos - vWorld);
-  float facing = abs(dot(normalize(vN), view));
-  float dist = u_ortho == 1 ? dot(vWorld - u_camPos, u_camDir) : length(vWorld - u_camPos);
-  float scene = texture(u_depth, sc).r;
-  if (dist > scene * 1.003 + .004) discard;
+  float facing = 1.;
+  if (u_flat == 0) {
+    vec3 view = u_ortho == 1 ? -u_camDir : normalize(u_camPos - vWorld);
+    facing = abs(dot(normalize(vN), view));
+    float dist = u_ortho == 1 ? dot(vWorld - u_camPos, u_camDir) : length(vWorld - u_camPos);
+    float scene = texture(u_depth, sc).r;
+    if (dist > scene * 1.003 + .004) discard;
+  }
   vec2 px = sc * u_screen;
   float keep = 1.;
   for (int i = 0; i < ${MAX_DABS}; i++) {

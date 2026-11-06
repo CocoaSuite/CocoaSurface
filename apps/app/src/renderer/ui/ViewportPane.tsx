@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Button, IconButton } from '@cocoasurface/ui';
+import { Button, IconButton, Segmented } from '@cocoasurface/ui';
 import { applyItem, isShelfDrag, shelfItem, useMaterial } from './Shelf';
 import { CHANNELS, MESH_MAPS } from '@cocoasurface/project';
 import { Viewport } from '../engine/viewport';
@@ -56,6 +56,7 @@ export function ViewportPane() {
         <img className="cs-stencil" src={stencilUrl} alt="" style={{ left: `${stencil.x * 100}%`, top: `${stencil.y * 100}%`, width: `${stencil.scale * 100}%`, transform: `translate(-50%, -50%) rotate(${-stencil.angle}deg)` }} />
       )}
       <div className="cs-overlay">
+        <Segmented label="View" options={[{ value: '3d', label: '3D' }, { value: '2d', label: '2D' }]} value={view.flat ? '2d' : '3d'} onChange={(v) => set((s) => ({ view: { ...s.view, flat: v === '2d' } }))} />
         <select className="cs-select" aria-label="Show" value={view.mode} onChange={(e) => set((s) => ({ view: { ...s.view, mode: e.target.value as ViewMode } }))}>
           <option value="material">Material</option>
           {CHANNELS.map((c) => (

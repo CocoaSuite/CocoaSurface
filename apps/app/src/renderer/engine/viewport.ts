@@ -42,6 +42,14 @@ export class Viewport {
   private lastEnd: THREE.Vector2 | null = null;
   private sDown = false;
   private unsub: () => void;
+  /** 2D view: the current texture set laid out flat. */
+  readonly flatScene = new THREE.Scene();
+  readonly flatCam = new THREE.OrthographicCamera(-1, 1, 1, -1, -10, 10);
+  readonly flatNav: OrbitControls;
+  private flatKey = '';
+  private flatGeo = new Map<number, THREE.BufferGeometry>();
+  private flatGeoOf: unknown = null;
+  private flatPick = new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide });
 
   constructor(readonly host: HTMLElement) {
     this.r = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -63,6 +71,16 @@ export class Viewport {
     this.controls = new OrbitControls(this.persp, this.r.domElement);
     this.controls.enableDamping = false;
     this.controls.addEventListener('change', () => this.redraw());
+    this.flatCam.position.set(0.5, 0.5, 5);
+    this.flatCam.userData.flat = true;
+    this.flatNav = new OrbitControls(this.flatCam, this.r.domElement);
+    this.flatNav.enableRotate = false;
+    this.flatNav.enableDamping = false;
+    this.flatNav.screenSpacePanning = true;
+    this.flatNav.zoomToCursor = true;
+    this.flatNav.target.set(0.5, 0.5, 0);
+    this.flatNav.update();
+    this.flatNav.addEventListener('change', () => this.redraw());
     this.navButtons(false);
     this.cursor = document.createElement('div');
     this.cursor.className = 'cs-cursor';
@@ -87,8 +105,17 @@ export class Viewport {
     this.loop();
   }
 
+  get flat(): boolean {
+    const s = get();
+    return !!s.view.flat && !s.lightEdit;
+  }
+
   get camera(): THREE.PerspectiveCamera | THREE.OrthographicCamera {
-    return get().view.ortho ? this.ortho : this.persp;
+    return this.flat ? this.flatCam : get().view.ortho ? this.ortho : this.persp;
+  }
+
+  private get nav(): OrbitControls {
+    return this.flat ? this.flatNav : this.controls;
   }
 
   redraw(): void {
@@ -100,6 +127,8 @@ export class Viewport {
     this.ro.disconnect();
     this.unsub();
     this.controls.dispose();
+    this.flatNav.dispose();
+    for (const g of this.flatGeo.values()) g.dispose();
     this.r.dispose();
     this.r.domElement.remove();
     this.cursor.remove();
@@ -108,6 +137,7 @@ export class Viewport {
   private navButtons(alt: boolean): void {
     const none = null as unknown as THREE.MOUSE;
     this.controls.mouseButtons = { LEFT: alt ? THREE.MOUSE.ROTATE : none, MIDDLE: THREE.MOUSE.PAN, RIGHT: alt ? THREE.MOUSE.DOLLY : none };
+    this.flatNav.mouseButtons = { LEFT: alt ? THREE.MOUSE.PAN : none, MIDDLE: THREE.MOUSE.PAN, RIGHT: alt ? THREE.MOUSE.DOLLY : none };
   }
 
   private resize(): void {
@@ -128,6 +158,12 @@ export class Viewport {
     this.ortho.top = d;
     this.ortho.bottom = -d;
     this.ortho.updateProjectionMatrix();
+    const a = w / h, k = 0.56;
+    this.flatCam.left = -k * a;
+    this.flatCam.right = k * a;
+    this.flatCam.top = k;
+    this.flatCam.bottom = -k;
+    this.flatCam.updateProjectionMatrix();
   }
 
   /** Show the model with the current texture sets' materials. */
@@ -143,6 +179,14 @@ export class Viewport {
   }
 
   frame(): void {
+    if (this.flat) {
+      this.flatCam.zoom = 1;
+      this.flatCam.position.set(0.5, 0.5, 5);
+      this.flatNav.target.set(0.5, 0.5, 0);
+      this.flatCam.updateProjectionMatrix();
+      this.flatNav.update();
+      return;
+    }
     const m = engine.model;
     if (!m) return;
     const box = new THREE.Box3().setFromObject(m.root);
@@ -157,6 +201,7 @@ export class Viewport {
   }
 
   look(v: CameraView): void {
+    if (this.flat) return;
     const t = this.controls.target, d = this.persp.position.distanceTo(t);
     const dirs: Record<CameraView, [number, number, number]> = { front: [0, 0, 1], back: [0, 0, -1], left: [-1, 0, 0], right: [1, 0, 0], top: [0, 1, 0.0001], bottom: [0, -1, 0.0001] };
     this.persp.position.copy(t).add(new THREE.Vector3(...dirs[v]).multiplyScalar(d));
@@ -173,8 +218,11 @@ export class Viewport {
   applyView(): void {
     const s = get();
     const v = s.view;
-    this.controls.object = this.camera;
+    this.controls.object = v.ortho ? this.ortho : this.persp;
+    this.controls.enabled = !this.flat;
+    this.flatNav.enabled = this.flat;
     this.syncOrtho();
+    this.showFlat();
     this.grid.visible = v.grid;
     this.scene.environmentIntensity = v.light;
     this.scene.environmentRotation.set(0, THREE.MathUtils.degToRad(v.turn), 0);
@@ -221,6 +269,81 @@ export class Viewport {
       if (v.wire) this.wireOf = m;
     }
     this.redraw();
+  }
+
+  /** The current set's texture on a square with its UV wires over it. */
+  private showFlat(): void {
+    const s = get();
+    const m = engine.model;
+    const t = currentSet(s);
+    if (this.flatGeoOf !== m) {
+      for (const g of this.flatGeo.values()) g.dispose();
+      this.flatGeo.clear();
+      this.flatGeoOf = m;
+      this.flatKey = '';
+    }
+    const key = this.flat && m && t ? `${t.id}|${t.slots.join()}` : '';
+    if (key !== this.flatKey) {
+      for (const c of this.flatScene.children) {
+        const o = c as THREE.Mesh;
+        if (c.userData.part == null) o.geometry.dispose();
+        if (c instanceof THREE.LineSegments || c.userData.back) (o.material as THREE.Material).dispose();
+      }
+      this.flatScene.clear();
+      this.flatKey = key;
+      const g = key ? engine.sets.get(t!.id) : null;
+      if (key && m) {
+        const quad = new THREE.PlaneGeometry(1, 1).translate(0.5, 0.5, 0);
+        if (!m.vUp) {
+          const uv = quad.getAttribute('uv');
+          for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - uv.getY(i));
+        }
+        const back = new THREE.Mesh(quad.clone(), new THREE.MeshBasicMaterial({ color: 0x262626 }));
+        back.position.z = -0.01;
+        back.userData.back = true;
+        const sheet = new THREE.Mesh(quad, engine.channelMaterial(t!.id, 'color'));
+        sheet.userData.sheet = true;
+        const edge = new THREE.LineSegments(new THREE.EdgesGeometry(quad), new THREE.LineBasicMaterial({ color: 0x5a5a5a }));
+        this.flatScene.add(back, sheet, edge);
+        for (const i of g?.parts ?? m.parts.map((_, j) => j)) {
+          const geo = this.flatGeometry(i);
+          if (!geo) continue;
+          const pick = new THREE.Mesh(geo, this.flatPick);
+          pick.userData.part = i;
+          const wire = new THREE.LineSegments(new THREE.WireframeGeometry(geo), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3 }));
+          wire.position.z = 0.005;
+          this.flatScene.add(pick, wire);
+        }
+      }
+    }
+    if (key) this.flatSheet();
+  }
+
+  /** A part laid out by its texture coordinates, with the same faces (for the fill tool and the picker). */
+  private flatGeometry(part: number): THREE.BufferGeometry | null {
+    let g = this.flatGeo.get(part);
+    const src = engine.model?.parts[part]?.mesh.geometry;
+    const uv = src?.getAttribute('uv');
+    if (!g && src && uv) {
+      const up = engine.model!.vUp;
+      const pos = new Float32Array(uv.count * 3);
+      for (let i = 0; i < uv.count; i++) (pos[i * 3] = uv.getX(i)), (pos[i * 3 + 1] = up ? uv.getY(i) : 1 - uv.getY(i));
+      g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setAttribute('uv', uv);
+      if (src.index) g.setIndex(src.index);
+      this.flatGeo.set(part, g);
+    }
+    return g ?? null;
+  }
+
+  private flatSheet(): void {
+    const s = get();
+    const t = currentSet(s);
+    const sheet = this.flatScene.children.find((c) => c.userData.sheet) as THREE.Mesh | undefined;
+    if (!sheet || !t) return;
+    const mode = s.view.mode === 'material' ? 'color' : s.view.mode;
+    sheet.material = engine.channelMaterial(t.id, mode);
   }
 
   /** An environment's lighting and sky, loaded the first time it's used. */
@@ -312,13 +435,14 @@ export class Viewport {
     this.flush();
     if (engine.update()) {
       const s = get();
-      if (s.view.mode !== 'material') for (const t of s.project?.textureSets ?? []) engine.channelMaterial(t.id, s.view.mode as Exclude<typeof s.view.mode, 'material'>);
+      if (this.flat) this.flatSheet();
+      else if (s.view.mode !== 'material') for (const t of s.project?.textureSets ?? []) engine.channelMaterial(t.id, s.view.mode as Exclude<typeof s.view.mode, 'material'>);
       this.needs = true;
     }
     if (!this.needs) return;
     this.needs = false;
     this.r.setRenderTarget(null);
-    this.r.render(this.scene, this.camera);
+    this.r.render(this.flat ? this.flatScene : this.scene, this.camera);
   };
 
   // Painting
@@ -402,7 +526,7 @@ export class Viewport {
       out.push(new THREE.Vector4(p.x, p.y, radius * (bySize ? Math.max(0.05, pr) : 1), byFlow ? pr : 1));
       d += step;
     }
-    if (get().symmetry) for (const m of out.map((p) => this.mirror(p))) if (m) out.push(m);
+    if (get().symmetry && !this.flat) for (const m of out.map((p) => this.mirror(p))) if (m) out.push(m);
     return { dabs: out, carry: d - len };
   }
 
@@ -411,7 +535,13 @@ export class Viewport {
     if (!m) return null;
     const w = this.r.domElement.width, h = this.r.domElement.height;
     this.ray.setFromCamera(new THREE.Vector2((x / w) * 2 - 1, (y / h) * 2 - 1), this.camera);
-    return this.ray.intersectObjects(m.parts.map((p) => p.mesh), false)[0] ?? null;
+    const targets = this.flat ? this.flatScene.children.filter((c) => c.userData.part != null) : m.parts.map((p) => p.mesh);
+    return this.ray.intersectObjects(targets, false)[0] ?? null;
+  }
+
+  private partOf(hit: THREE.Intersection | null): number {
+    if (!hit || !engine.model) return -1;
+    return (hit.object.userData.part as number | undefined) ?? engine.model.parts.findIndex((p) => p.mesh === hit.object);
   }
 
   /** The dab on the other side of the model (mirrored across X), if it can be seen. */
@@ -449,7 +579,7 @@ export class Viewport {
     }, { capture: true, passive: false });
     const grab = (e: PointerEvent) => {
       e.stopImmediatePropagation();
-      this.controls.enabled = false;
+      this.nav.enabled = false;
       el.setPointerCapture(e.pointerId);
     };
     el.addEventListener('pointerdown', (e) => {
@@ -537,12 +667,12 @@ export class Viewport {
       if (this.bulbDrag) {
         if (this.bulbDrag.moved) commit('Move bake light');
         this.bulbDrag = null;
-        this.controls.enabled = true;
+        this.nav.enabled = true;
         return;
       }
       if (this.stencilDrag || this.adjust || this.lightDrag) {
         this.stencilDrag = this.adjust = this.lightDrag = null;
-        this.controls.enabled = true;
+        this.nav.enabled = true;
         return;
       }
       const st = this.stroke;
@@ -561,7 +691,7 @@ export class Viewport {
     const at = this.screen(e);
     const hit = this.hit(at.x, at.y);
     const m = engine.model;
-    const part = hit && m ? m.parts.findIndex((p) => p.mesh === hit.object) : -1;
+    const part = m ? this.partOf(hit) : -1;
     if (!hit?.uv || part < 0) return;
     const g = [...engine.sets.values()].find((x) => x.parts.includes(part));
     if (!g) return;
@@ -606,7 +736,7 @@ export class Viewport {
     const at = this.screen(e);
     const hit = this.hit(at.x, at.y);
     const m = engine.model!;
-    const part = hit ? m.parts.findIndex((p) => p.mesh === hit.object) : -1;
+    const part = this.partOf(hit);
     if (!hit || part < 0 || hit.faceIndex == null) return toast('Click on the model to fill.');
     const g = engine.sets.get(t.set)!;
     if (!g.parts.includes(part)) return toast('That part belongs to another texture set.');
