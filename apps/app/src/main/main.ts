@@ -125,6 +125,9 @@ ipcMain.handle('recovery:read', async () => (existsSync(recoveryFile()) ? new Ui
 ipcMain.handle('recovery:clear', () => rm(recoveryFile(), { force: true }));
 ipcMain.handle('title', (_e, t: string) => win?.setTitle(t));
 
+// Laptops: bake and draw on the dedicated GPU, not the integrated one.
+app.commandLine.appendSwitch('force_high_performance_gpu');
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   createWindow();

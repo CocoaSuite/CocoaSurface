@@ -688,7 +688,8 @@ const QUAD = /* glsl */ `out vec2 vUv; void main() { vUv = uv; gl_Position = vec
 
 const PER_PASS = 8;
 /** Each draw aims to take about this long: long enough to keep the graphics card busy, short enough not to stall the screen or trip the driver's watchdog. */
-const BAND_MS = 60;
+/** Target GPU time per band: long enough to keep the GPU busy, well under the OS watchdog. */
+const BAND_MS = 300;
 /** Float targets are this large at most (memory), so anti-aliasing is lowered for big maps. */
 const MAX_WORK = 4096;
 
@@ -817,8 +818,29 @@ export async function bakeSet(
   const lit = lights.length > 0 && (want.has('light') || mix > 0);
   if (lit) for (let i = 0; i < rayPasses; i++) passes.push({ out: 'light', mode: 9, seed: i + 1 });
   const total = passes.length + 1;
-  const sync = new Float32Array(4);
   let last = performance.now();
+  // Bands are timed with fences, keeping one queued ahead, so the GPU never waits on the CPU.
+  const gl = r.getContext() as WebGL2RenderingContext;
+  const fences: { f: WebGLSync; h: number; kind: number }[] = [];
+  let since = 0;
+  const settle = async (keep: number) => {
+    while (fences.length > keep) {
+      const x = fences[0]!;
+      while (gl.clientWaitSync(x.f, gl.SYNC_FLUSH_COMMANDS_BIT, 0) === gl.TIMEOUT_EXPIRED) await new Promise((res) => setTimeout(res, 1));
+      gl.deleteSync(x.f);
+      fences.shift();
+      const now = performance.now();
+      const ms = Math.max(now - since, 0.5);
+      since = now;
+      const b = bands.get(x.kind) ?? start;
+      bands.set(x.kind, Math.max(8, Math.min(work, b * 2, Math.floor((x.h / ms) * BAND_MS))));
+    }
+  };
+  const fence = (h: number, kind: number) => {
+    if (!fences.length) since = performance.now();
+    fences.push({ f: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)!, h, kind });
+    gl.flush();
+  };
   // Each kind of pass learns its own band height, so a slow pass never starts at a cheap one's size.
   const bands = new Map<number, number>();
   const start = Math.max(8, Math.round(65536 / work));
@@ -866,12 +888,13 @@ export async function bakeSet(
       mat.uniforms.u_sn!.value = raw.get('sn')?.texture ?? null;
       r.autoClear = false;
       const kind = ps.mode * 2 + (ps.mode === 8 && bevel ? 1 : 0);
-      let band = bands.get(kind) ?? start;
       // Full-width bands whose height follows how long the last one took.
       for (let y = 0; y < work; ) {
-        if (cancelled()) return false;
-        const h = Math.min(band, work - y);
-        const t0 = performance.now();
+        if (cancelled()) {
+          for (const x of fences) gl.deleteSync(x.f);
+          return false;
+        }
+        const h = Math.min(bands.get(kind) ?? start, work - y);
         t.scissor.set(0, y, work, h);
         t.scissorTest = true;
         for (const grp of groups) {
@@ -881,19 +904,17 @@ export async function bakeSet(
           mat.uniforms.u_ids!.value = st.idFrom === 'mesh' ? own.idMesh : own.idSlot;
           g.drawWith(stages[ps.mode === 8 && bevel ? 2 : ps.mode === 9 ? 3 : ps.mode === 4 || ps.mode >= 7 ? 0 : ps.mode >= 5 ? 3 : 1], t, grp.length === 1 ? grp[0] : undefined);
         }
-        r.readRenderTargetPixels(t, 0, y, 1, 1, sync);
-        const ms = performance.now() - t0;
+        fence(h, kind);
+        await settle(1);
         y += h;
-        if (ms < BAND_MS / 2) band = Math.min(work, band * 2);
-        else if (ms > BAND_MS * 2) band = Math.max(8, Math.floor((band * BAND_MS) / ms));
-        if (performance.now() - last > 120) {
+        if (performance.now() - last > 500) {
           progress({ done: i + y / work, total });
           await new Promise((res) => requestAnimationFrame(res));
           last = performance.now();
         }
       }
+      await settle(0);
       t.scissorTest = false;
-      bands.set(kind, band);
       progress({ done: i + 1, total });
       // Show the map as it comes along: after each ray pass, or once it's done.
       const m = (ps.out === 'sn' ? 'worldNormal' : ps.out) as MeshMap;
