@@ -13,8 +13,6 @@ jobs:
         include:
           - os: windows-latest
             script: dist:win
-          - os: macos-latest
-            script: dist:mac
           - os: ubuntu-latest
             script: dist:linux
     runs-on: ${{ matrix.os }}
@@ -42,8 +40,9 @@ jobs:
           if-no-files-found: ignore
 
   release:
-    # Publish whatever built, so a Mac build that never gets a machine doesn't hold back the
-    # Windows and Linux installers. The step below still refuses a release without a Windows setup.
+    # Windows and Linux only: macOS runners never reliably start for this account, so the Mac app
+    # is built locally (npm run dist:mac -w @cocoasurface/app) and can be added to the release by hand.
+    # The step below still refuses a release without a Windows setup.
     if: always() && startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
