@@ -35,6 +35,10 @@ The 3D/2D switch in the viewport (and Viewport > 2D view) shows the current text
 - The Bake dialog lists the meshes occlusion is cast against (the high-poly's when baking from it); untick one and it no longer darkens anything (`aoExclude`, a separate BVH in `baking.ts`). Bake lights use the same set.
 - Bake lights (`project.bakeLights`: position in model space, size, strength) are placed from the Bake dialog: the viewport shows the model in grey with shadowed point lights and a draggable handle per light (`Viewport.showLights`, `ui/LightPanel.tsx`), and "Back to baking" reopens the dialog with its settings. They bake into the Light map (mode 9: soft-shadowed visibility times N·L, summed over lights) and can brighten occlusion (`lightMix`: `1 - (1 - ao)(1 - mix·light)`). "Lit by bake lights" is a smart mask source.
 
+## Installers
+
+`npm run dist -w @cocoasurface/app` (or `dist:win`, `dist:mac`, `dist:linux`) builds standalone installers into `apps/app/release` with electron-builder: a Windows setup (`CocoaSurface-Setup-<version>.exe`, NSIS, pick the folder), a macOS disk image and zip for Apple silicon, and a Linux AppImage and `.deb`. Everything the app needs is bundled into `dist/`, so no `node_modules` ship. `.cocoasurf` files open in CocoaSurface: at launch (command line, double-click, Open with) and while it runs, where the project goes to the open window instead of a second one (`launched` and `open-file` in `main.ts`). Pushing a `v<version>` tag that matches `apps/app/package.json` runs `.github/workflows/build.yml`, which builds on all three systems and publishes a GitHub release; the CocoaSuite website's CocoaSurface page offers that release's files.
+
 ## Not yet
 
 - Projection and clone tools.
@@ -46,7 +50,8 @@ The 3D/2D switch in the viewport (and Viewport > 2D view) shows the current text
 - UV overlap warnings, split 3D/2D view, multiple UV sets (the first UV set is used).
 - EXR, TIFF, TGA and 16-bit export.
 - Live link with CocoaWorlds; tested against the CocoaWorlds reader code, not yet inside the running CocoaWorlds editor.
-- Installers and updates.
+- In-app updates (installers are built; a new version means downloading the new installer).
+- Signed installers: Windows shows a SmartScreen warning and macOS asks to allow the app in Privacy & Security on first launch.
 
 ## Limits
 

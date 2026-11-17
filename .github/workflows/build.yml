@@ -1,0 +1,74 @@
+name: Build installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: dist:win
+          - os: macos-latest
+            script: dist:mac
+          - os: ubuntu-latest
+            script: dist:linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run ${{ matrix.script }} -w @cocoasurface/app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CocoaSurface-${{ matrix.os }}
+          path: |
+            apps/app/release/*.exe
+            apps/app/release/*.dmg
+            apps/app/release/*.zip
+            apps/app/release/*.AppImage
+            apps/app/release/*.deb
+          if-no-files-found: ignore
+
+  release:
+    # Publish whatever built, so a Mac build that never gets a machine doesn't hold back the
+    # Windows and Linux installers. The step below still refuses a release without a Windows setup.
+    if: always() && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches the app version
+        run: |
+          v=$(node -p "require('./apps/app/package.json').version")
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "Tag ${GITHUB_REF_NAME} does not match apps/app/package.json version $v"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Check the Windows setup built
+        run: ls release/*.exe
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: CocoaSurface ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.deb

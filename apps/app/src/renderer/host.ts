@@ -12,6 +12,10 @@ interface Desktop {
   recent(): Promise<string[]>;
   recovery: { write(b: Uint8Array): Promise<void>; read(): Promise<Uint8Array | null>; clear(): Promise<void> };
   title(t: string): Promise<void>;
+  /** A project the system asked to open at launch (desktop only). */
+  launched?(): Promise<string | null>;
+  /** Projects the system asks to open while the app runs (desktop only). Returns an unsubscribe. */
+  onOpenFile?(cb: (path: string) => void): () => void;
 }
 
 declare global {

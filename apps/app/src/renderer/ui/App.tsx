@@ -10,6 +10,7 @@ import { Layers, addLayer, duplicate, removeCurrentLayer } from './Layers';
 import { Shelf } from './Shelf';
 import { LightPanel } from './LightPanel';
 import { loadLibrary } from '../assets';
+import { host } from '../host';
 import { Properties } from './Properties';
 import { Start } from './Start';
 import { DisplaySettings, TextureSetList, TextureSetSettings } from './TextureSets';
@@ -99,10 +100,18 @@ export function App() {
     p === 'list' ? <TextureSetList /> : p === 'settings' ? <TextureSetSettings onBake={() => setBaking(true)} /> : p === 'display' ? <DisplaySettings /> : p === 'layers' ? <Layers /> : p === 'properties' ? <Properties /> : <Shelf />;
 
   useEffect(() => {
-    void recover();
+    void (async () => {
+      await recover();
+      const p = await host.launched?.();
+      if (p) await openProject(p);
+    })();
+    const off = host.onOpenFile?.((p) => void openProject(p));
     void loadLibrary();
     const t = setInterval(() => void autosave(), 90_000);
-    return () => clearInterval(t);
+    return () => {
+      clearInterval(t);
+      off?.();
+    };
   }, []);
 
   useEffect(() => {

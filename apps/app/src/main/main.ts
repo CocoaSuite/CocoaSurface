@@ -34,6 +34,23 @@ function inFolder(folder: string, name: string): string | null {
   return path.join(folder, name);
 }
 
+/** A project the system asked us to open (double-click, Open with, dock drop) before the renderer was ready. */
+let pending: string | null = null;
+let rendererReady = false;
+
+const projectArg = (argv: string[]): string | null =>
+  argv.slice(1).find((a) => a.toLowerCase().endsWith('.cocoasurf') && existsSync(a)) ?? null;
+
+function openFromSystem(p: string | null): void {
+  if (!p) return;
+  allowed.add(p);
+  if (win && rendererReady) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+    win.webContents.send('open-file', p);
+  } else pending = p;
+}
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1440,
@@ -45,7 +62,7 @@ function createWindow(): void {
     // The app's own top bar is the title bar; the system draws its window buttons over its right end (left on macOS).
     titleBarStyle: 'hidden',
     titleBarOverlay: process.platform === 'darwin' ? true : { color: '#1a1a1a', symbolColor: '#e8e8e8', height: 37 },
-    icon: path.join(__dirname, '../../build/icon.png'),
+    icon: path.join(__dirname, 'icon.png'),
     show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
@@ -68,8 +85,19 @@ function createWindow(): void {
   const dev = process.env.CS_DEV_URL;
   if (dev) void win.loadURL(dev);
   else void win.loadFile(path.join(__dirname, '../renderer/index.html'));
-  win.on('closed', () => (win = null));
+  win.webContents.on('did-start-loading', () => (rendererReady = false));
+  win.on('closed', () => {
+    win = null;
+    rendererReady = false;
+  });
 }
+
+ipcMain.handle('launched', () => {
+  rendererReady = true;
+  const p = pending;
+  pending = null;
+  return p;
+});
 
 ipcMain.handle('open', async (_e, filters: Filter[], multi: boolean) => {
   const r = await dialog.showOpenDialog(win!, { filters, properties: multi ? ['openFile', 'multiSelections'] : ['openFile'] });
@@ -127,6 +155,24 @@ ipcMain.handle('title', (_e, t: string) => win?.setTitle(t));
 
 // Laptops: bake and draw on the dedicated GPU, not the integrated one.
 app.commandLine.appendSwitch('force_high_performance_gpu');
+
+// One window: opening a project while CocoaSurface runs hands it to the running app.
+if (!app.requestSingleInstanceLock()) app.quit();
+app.on('second-instance', (_e, argv) => {
+  const p = projectArg(argv);
+  if (p) openFromSystem(p);
+  else if (win) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  }
+});
+// macOS hands files over with an event, possibly before the app is ready.
+app.on('open-file', (e, p) => {
+  e.preventDefault();
+  openFromSystem(p);
+});
+pending = projectArg(process.argv);
+if (pending) allowed.add(pending);
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);

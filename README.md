@@ -5,6 +5,7 @@
 ## What works today
 
 - Desktop app (Electron) with the Cocoa design language; also runs in a browser for development (`npm run web -w @cocoasurface/app`).
+- Standalone installers: Windows setup, macOS disk image (Apple silicon), Linux AppImage and `.deb`, built and released from a version tag. `.cocoasurf` projects open in CocoaSurface from the system.
 - Import FBX, OBJ, glTF (.glb), USDZ. One texture set per material slot, warnings for meshes without UVs.
 - Projected 3D painting on the GPU, written into the UV textures: size, flow, opacity, hardness, spacing, erase, mirror X, occlusion-aware (you can't paint through the model), seam padding. Round, square or picture tips with an angle, stencils, pen pressure (size, flow or both), a stabiliser, and fill, smudge and blur tools (the fill tool fills a UV island or a whole mesh).
 - Layer stack per texture set: paint layers, fill layers, groups, blend modes, opacity, per-layer channels, visibility and lock, drag to reorder, duplicate.
@@ -32,7 +33,10 @@ npm start          # launch the desktop app
 npm run dev        # renderer with hot reload inside Electron
 npm test           # unit tests (formats, layers, Cocoa Materials sync)
 npm run test:e2e -w @cocoasurface/app   # browser workflow test; set CHROMIUM to a Chromium binary
+npm run dist -w @cocoasurface/app       # standalone installers for this system, in apps/app/release
 ```
+
+To release, set the version in `apps/app/package.json`, then push a matching tag (`git tag v0.1.0 && git push origin v0.1.0`). GitHub Actions builds the Windows, macOS and Linux installers and publishes them as a release.
 
 ## Layout
 

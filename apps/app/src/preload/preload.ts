@@ -16,4 +16,10 @@ contextBridge.exposeInMainWorld('cocoa', {
     clear: () => ipcRenderer.invoke('recovery:clear'),
   },
   title: (t: string) => ipcRenderer.invoke('title', t),
+  launched: () => ipcRenderer.invoke('launched'),
+  onOpenFile: (cb: (path: string) => void) => {
+    const f = (_e: unknown, p: string) => cb(p);
+    ipcRenderer.on('open-file', f);
+    return () => void ipcRenderer.off('open-file', f);
+  },
 });
