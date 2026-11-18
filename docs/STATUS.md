@@ -13,7 +13,7 @@ Laid out like Substance Painter: menu bar, tool options bar, toolbar on the left
 - Imported alphas, textures and materials are stored in the project (`assets/`, `materials/`, listed in `project.assets` and `project.library`) and in a personal library in IndexedDB (`assets.ts`) that every project sees; a library item is copied into the project when used. Right-click an imported item in Assets to add it to or remove it from the library.
 - Procedural effect (masks and layers): a library noise or pattern with scale, seed, contrast, balance and invert, drawn on the GPU (`proc:` refs in `engine.procTexture`); on layers it goes from a dark to a light color in the color channel. Smart masks include presets (edge wear, chipped edges, dirt, dust, ground grime, thin parts).
 - Groups take effects: they run on what the group's layers make.
-- Export presets (CocoaWorlds, glTF / Blender, Unreal, Unity URP, Godot), packing (separate, ORM, Unity metal-smoothness) and per-map ticks (`export.skip`).
+- Export presets (CocoaWorlds, glTF / Blender, Unreal, Unity URP, Godot, Just mesh maps: only the baked maps, `export.meshOnly`), packing (separate, ORM, Unity metal-smoothness) and per-map ticks (`export.skip`).
 
 ## Baking interface
 

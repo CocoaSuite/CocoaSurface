@@ -17,16 +17,19 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const chosen = project.textureSets.filter((t) => sets.includes(t.id));
   const channels = CHANNELS.filter((c) => chosen.some((t) => t.channels.includes(c.id)));
   const packed = PACKED[pack] as readonly string[];
+  const baked = project.textureSets.some((t) => t.bake?.done.length);
+  const only = !!ex.meshOnly;
+  const withMesh = mesh || only;
   const outputs = [
-    ...(pack !== 'none' ? [{ value: 'pack', label: PACK_NAMES[pack] }] : []),
-    ...channels.filter((c) => !packed.includes(c.id)).map((c) => ({ value: c.id as string, label: MAP_NAMES[c.id] })),
-    ...(mesh ? MESH_MAPS.filter((m) => chosen.some((t) => t.bake?.done.includes(m.id))).map((m) => ({ value: `mesh:${m.id}`, label: `Mesh ${m.label.toLowerCase()}` })) : []),
+    ...(only ? [] : pack !== 'none' ? [{ value: 'pack', label: PACK_NAMES[pack] }] : []),
+    ...(only ? [] : channels.filter((c) => !packed.includes(c.id)).map((c) => ({ value: c.id as string, label: MAP_NAMES[c.id] }))),
+    ...(withMesh ? MESH_MAPS.filter((m) => chosen.some((t) => t.bake?.done.includes(m.id))).map((m) => ({ value: `mesh:${m.id}`, label: `Mesh ${m.label.toLowerCase()}` })) : []),
   ];
   const skip = ex.skip ?? [];
   const go = async () => {
     if (JSON.stringify(ex) !== JSON.stringify(project.export)) edit('Change export settings', (p) => ({ ...p, export: ex }));
     onClose();
-    await exportTextures(get().project!.textureSets.filter((t) => sets.includes(t.id)), mesh);
+    await exportTextures(get().project!.textureSets.filter((t) => sets.includes(t.id)), withMesh);
   };
   return (
     <Dialog title="Export textures" onClose={onClose} width={480}>
@@ -36,12 +39,12 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           value={ex.preset ?? ''}
           onChange={(e) => {
             const p = EXPORT_PRESETS.find((x) => x.id === e.target.value);
-            if (p) put({ ...p.set, packOrm: p.set.pack === 'orm', preset: p.id });
+            if (p) put({ ...p.set, ...(p.set.pack ? { packOrm: p.set.pack === 'orm' } : {}), preset: p.id });
           }}
         >
           <option value="">Custom</option>
           {EXPORT_PRESETS.map((p) => (
-            <option key={p.id} value={p.id}>
+            <option key={p.id} value={p.id} disabled={p.set.meshOnly && !baked}>
               {p.label}
             </option>
           ))}
@@ -68,15 +71,28 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         </select>
       </Field>
       <Field label="Packing">
-        <select className="cs-select" value={pack} onChange={(e) => put({ pack: e.target.value as ExportSettings['pack'], packOrm: e.target.value === 'orm' })}>
+        <select className="cs-select" value={pack} disabled={only} onChange={(e) => put({ pack: e.target.value as ExportSettings['pack'], packOrm: e.target.value === 'orm' })}>
           <option value="none">Separate maps</option>
           <option value="orm">Occlusion, roughness, metal in one (ORM)</option>
           <option value="unity">Metal with smoothness in alpha (Unity)</option>
         </select>
       </Field>
-      {project.textureSets.some((t) => t.bake?.done.length) && (
-        <Field label="Mesh maps">
-          <Switch checked={mesh} onChange={setMesh} label="Also export the baked mesh maps" />
+      {(baked || only) && (
+        <Field label="Export">
+          <select
+            className="cs-select"
+            value={only ? 'mesh' : mesh ? 'both' : 'textures'}
+            onChange={(e) => {
+              setMesh(e.target.value === 'both');
+              if ((e.target.value === 'mesh') !== only) put({ meshOnly: e.target.value === 'mesh' });
+            }}
+          >
+            <option value="textures">Painted textures</option>
+            <option value="both">Painted textures and baked mesh maps</option>
+            <option value="mesh" disabled={!baked}>
+              Just the baked mesh maps
+            </option>
+          </select>
         </Field>
       )}
       <div className="cs-sec">Maps</div>
@@ -89,7 +105,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
       ))}
       <div className="cs-actions">
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="primary" disabled={!sets.length} onClick={() => void go()}>
+        <Button variant="primary" disabled={!sets.length || (only && !outputs.length)} onClick={() => void go()}>
           Export…
         </Button>
       </div>
