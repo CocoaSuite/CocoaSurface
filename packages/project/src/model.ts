@@ -321,17 +321,20 @@ export interface ExportSettings {
   pack?: 'none' | 'orm' | 'unity';
   /** Outputs left out: channel ids, `pack`, or `mesh:<map>`. */
   skip?: string[];
+  /** Only the baked mesh maps, none of the painted textures. */
+  meshOnly?: boolean;
   preset?: string;
 }
 
 export const packOf = (ex: ExportSettings) => ex.pack ?? (ex.packOrm ? 'orm' : 'none');
 
 export const EXPORT_PRESETS: { id: string; label: string; set: Partial<ExportSettings> }[] = [
-  { id: 'cocoaworlds', label: 'CocoaWorlds', set: { naming: '{set}_{map}', normalGreen: 'up', pack: 'none' } },
-  { id: 'gltf', label: 'glTF / Blender', set: { naming: '{set}_{map}', normalGreen: 'up', pack: 'orm' } },
-  { id: 'unreal', label: 'Unreal Engine', set: { naming: 'T_{set}_{map}', normalGreen: 'down', pack: 'orm' } },
-  { id: 'unity', label: 'Unity (URP)', set: { naming: '{set}_{map}', normalGreen: 'up', pack: 'unity' } },
-  { id: 'godot', label: 'Godot', set: { naming: '{set}_{map}', normalGreen: 'up', pack: 'orm' } },
+  { id: 'cocoaworlds', label: 'CocoaWorlds', set: { naming: '{set}_{map}', normalGreen: 'up', pack: 'none', meshOnly: false } },
+  { id: 'gltf', label: 'glTF / Blender', set: { naming: '{set}_{map}', normalGreen: 'up', pack: 'orm', meshOnly: false } },
+  { id: 'unreal', label: 'Unreal Engine', set: { naming: 'T_{set}_{map}', normalGreen: 'down', pack: 'orm', meshOnly: false } },
+  { id: 'unity', label: 'Unity (URP)', set: { naming: '{set}_{map}', normalGreen: 'up', pack: 'unity', meshOnly: false } },
+  { id: 'godot', label: 'Godot', set: { naming: '{set}_{map}', normalGreen: 'up', pack: 'orm', meshOnly: false } },
+  { id: 'mesh', label: 'Just mesh maps', set: { meshOnly: true } },
 ];
 
 /** A picture the user brought in: a brush alpha or a texture for masks and stencils. Kept in the project. */

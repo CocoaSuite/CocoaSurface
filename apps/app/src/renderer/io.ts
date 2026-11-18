@@ -308,10 +308,11 @@ export async function exportTextures(sets: TextureSet[], meshMaps = false): Prom
       const size = ex.size || t.size;
       const name = (map: string) => `${ex.naming.replace('{set}', t.name.replace(/[^\w-]+/g, '_')).replace('{map}', map)}.png`;
       const maps = new Map<Channel, Uint8Array>();
-      for (const c of t.channels) {
-        const px = mapPixels(t, c, size);
-        if (px) maps.set(c, c === 'normal' && ex.normalGreen === 'down' ? flipGreen(px) : px);
-      }
+      if (!ex.meshOnly)
+        for (const c of t.channels) {
+          const px = mapPixels(t, c, size);
+          if (px) maps.set(c, c === 'normal' && ex.normalGreen === 'down' ? flipGreen(px) : px);
+        }
       const pack = packOf(ex), skip = new Set(ex.skip ?? []);
       if (pack === 'orm' && maps.has('roughness') && maps.has('metalness')) {
         const o = maps.get('occlusion'), r = maps.get('roughness')!, m = maps.get('metalness')!;
@@ -348,7 +349,7 @@ export async function exportTextures(sets: TextureSet[], meshMaps = false): Prom
         n++;
       }
       const g = engine.sets.get(t.id);
-      if (meshMaps && g)
+      if ((meshMaps || ex.meshOnly) && g)
         for (const [m, target] of g.baked) {
           if (ex.skip?.includes(`mesh:${m}`)) continue;
           const px = imageRows(g.p.read(target), target.width, g.vUp);
